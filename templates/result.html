@@ -48,7 +48,7 @@
           {{ filename }}
         </span>
         {% if p.status and 'NON RENSEIGNEE' not in p.status|upper %}
-          <span class="meta">{{ p.status }}</span>
+          <span class="meta">{{ p.status|replace("d'etat du projet", 'd’état du projet') }}</span>
         {% endif %}
       </div>
     </div>
@@ -104,7 +104,7 @@
                   {%- if item.kind == 'na' and item.value|upper == 'N/A' -%}
                     Non évaluable
                   {%- else -%}
-                    {{ item.value }}{% if item.detail and item.detail != '-' %} ({{ item.detail }}){% endif %}
+                    {{ item.value|replace('.', ',')|replace('%', ' %') }}{% if item.detail and item.detail != '-' %} ({{ item.detail }}){% endif %}
                   {%- endif -%}
                   · <span class="target">cible {{ item.target }}</span>
                 </div>
@@ -146,8 +146,8 @@
                   </div>
                 </td>
                 <td class="num">
-                  <div class="val">{{ row.value }}</div>
-                  {% if row.detail and row.detail != '-' %}<div class="val-sub">{{ row.detail }}</div>{% endif %}
+                  <div class="val">{{ row.value|replace('.', ',')|replace('%', ' %') }}</div>
+                  {% if row.detail and row.detail != '-' %}<div class="val-sub">{{ row.detail|replace('.', ',') }}</div>{% endif %}
                 </td>
                 <td class="num target-cell">{{ row.target }}</td>
                 <td><span class="badge {{ badge_of.get(row.css, 'b-na') }}" title="{{ row.verdict }}">{{ label_of.get(row.kind, row.verdict) }}</span></td>
