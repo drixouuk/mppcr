@@ -2,12 +2,16 @@
 
 {% block title %}{{ filename }} — MPPCR{% endblock %}
 
-{# Barre de navigation de la maquette, sans JavaScript : « Formulaire » est un
-   lien réel, chaque résultat obtenu est une ancre vers sa section. Un résultat
-   non demandé dans cette requête reste affiché mais inerte. #}
+{# Barre de navigation de la maquette, sans JavaScript : chaque résultat obtenu
+   est une ancre vers sa section, et un résultat non demandé dans cette requête
+   reste affiché mais inerte. L'onglet de gauche ramène au formulaire — c'est un
+   abandon du résultat affiché, donc il est libellé explicitement « Nouvelle
+   analyse » ici (et non « Formulaire ») et confirmé en JavaScript quand le
+   navigateur l'exécute. #}
 {% block tabs %}
   {% set kinds = results|map(attribute='kind')|list %}
-  <a class="tab" href="{{ url_for('index') }}"><span class="n">①</span> Formulaire</a>
+  <a class="tab" id="tab-form" href="{{ url_for('index') }}"
+     title="Quitter ce résultat : l’analyse devra être relancée pour être réaffichée"><span class="n">①</span> Nouvelle analyse</a>
   {% if 'dcma' in kinds %}
     <a class="tab" href="#dcma"{% if kinds[0] == 'dcma' %} aria-current="location"{% endif %}><span class="n">②</span> Résultat DCMA-14</a>
   {% else %}
@@ -356,4 +360,24 @@
   </div>
 {% endfor %}
 </section>
+
+{# Garde-fou : un clic accidentel sur « Nouvelle analyse » ferait perdre le
+   résultat affiché (il naît d'un POST, il n'est conservé nulle part).
+   Amélioration progressive uniquement : sans JavaScript, le lien fonctionne
+   normalement et le formulaire reste utilisable. #}
+<script>
+  (function () {
+    var link = document.getElementById("tab-form");
+    if (!link || !window.confirm) return;
+    link.addEventListener("click", function (ev) {
+      var ok = window.confirm(
+        "Quitter ce résultat ?\n\n" +
+        "L’analyse affichée ne sera plus accessible : il faudra la relancer sur le même fichier " +
+        "(1 analyse décomptée de votre quota).\n\n" +
+        "Le bouton Précédent du navigateur permet de revenir à ce résultat sans relancer l’analyse."
+      );
+      if (!ok) ev.preventDefault();
+    });
+  })();
+</script>
 {% endblock %}
