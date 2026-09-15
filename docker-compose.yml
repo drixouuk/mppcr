@@ -1,0 +1,9 @@
+services:
+  mpp:
+    build: .
+    container_name: mpp
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      ANALYSIS_TIMEOUT: "900"

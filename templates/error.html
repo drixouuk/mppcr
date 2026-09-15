@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% set v = variant|default('err', true) %}
+
+{% block title %}{{ title|default('Analyse impossible', true) }} — MPPCR{% endblock %}
+
+{% block topbar_actions %}
+<a class="btn btn-ghost" href="{{ url_for('index') }}">Retour au formulaire</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <p class="app-tag"><b>MPPCR</b> — MS Project Check &amp; Risk</p>
+  <h1 class="page-title">{{ title|default('Analyse impossible', true) }}</h1>
+</div>
+
+<div class="card">
+  <div class="c {{ 'c-warn' if v == 'warn' else 'c-err' }}">
+    <svg class="c-ico" aria-hidden="true"><use href="{{ '#i-warn' if v == 'warn' else '#i-err' }}"></use></svg>
+    <div>
+      <strong>Message</strong>
+      <p>{{ message }}</p>
+    </div>
+  </div>
+
+  <div class="head-actions">
+    <a class="btn" href="{{ url_for('index') }}">Analyser un autre planning</a>
+  </div>
+</div>
+{% endblock %}

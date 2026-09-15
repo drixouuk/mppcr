@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block title %}{{ filename }} — MPPCR{% endblock %}
+
+{% block topbar_actions %}
+<a class="btn btn-ghost" href="{{ url_for('index') }}">Nouvelle analyse</a>
+{% endblock %}
+
+{% block content %}
+{# Correspondance entre les classes produites par app.py et les badges du design. #}
+{% set badge_of = {'badge-ok': 'b-ok', 'badge-ko': 'b-err', 'badge-info': 'b-info', 'badge-na': 'b-na'} %}
+{% set stamp_of = {'status-ok': 'b-ok', 'status-ko': 'b-err', 'status-na': 'b-na'} %}
+
+<div class="page-head">
+  <p class="app-tag">
+    <b>MPPCR</b> —
+    {%- if results|length > 1 %} Diagnostic qualité DCMA-14 et simulation Monte Carlo
+    {%- elif results[0].kind == 'dcma' %} Diagnostic qualité DCMA-14
+    {%- else %} Simulation Monte Carlo{% endif %}
+  </p>
+  <h1 class="filename">{{ filename }}</h1>
+  <p class="meta-line">
+    {%- if results|length > 1 %}Deux analyses exécutées sur ce planning{% else %}Une analyse exécutée sur ce planning{% endif %}
+  </p>
+</div>
+
+{% for result in results %}
+  {% set p = result.parsed %}
+
+  {% if result.kind == 'dcma' %}
+  {# ===================== RÉSULTAT DCMA-14 ===================== #}
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>Diagnostic qualité DCMA-14</h2>
+        {% if p.status %}<p class="section-sub">{{ p.status }}</p>{% endif %}
+      </div>
+      {% if p.status_label %}
+        <span class="b {{ stamp_of.get(p.status_css, 'b-na') }}">{{ p.status_label }}</span>
+      {% endif %}
+    </div>
+
+    {% if p.rows %}
+      <div class="kpis">
+        <div class="kpi is-info">
+          <div class="kpi-label">Contrôles</div>
+          <div class="kpi-value">{{ p.kpi.total }}</div>
+          <div class="kpi-sub">DCMA-14</div>
+        </div>
+        <div class="kpi is-ok">
+          <div class="kpi-label">Conformes</div>
+          <div class="kpi-value">{{ p.kpi.ok }}</div>
+          <div class="kpi-sub">Cible atteinte</div>
+        </div>
+        <div class="kpi is-ko">
+          <div class="kpi-label">À corriger</div>
+          <div class="kpi-value">{{ p.kpi.ko }}</div>
+          <div class="kpi-sub">Écarts DCMA</div>
+        </div>
+        <div class="kpi is-na">
+          <div class="kpi-label">N/A</div>
+          <div class="kpi-value">{{ p.kpi.na }}</div>
+          <div class="kpi-sub">Données manquantes</div>
+        </div>
+        <div class="kpi is-info">
+          <div class="kpi-label">Info</div>
+          <div class="kpi-value">{{ p.kpi.info }}</div>
+          <div class="kpi-sub">Sans seuil strict</div>
+        </div>
+      </div>
+
+      {% if p.status and 'NON RENSEIGNEE' in p.status|upper %}
+        <div class="c c-warn">
+          <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
+          <div>
+            <strong>Date d’état non renseignée</strong>
+            <p>Les contrôles qui dépendent de la date d’état (dates invalides, BEI) restent N/A. Renseigner la date d’état du projet dans MS Project, puis relancer l’analyse pour obtenir un diagnostic complet.</p>
+          </div>
+        </div>
+      {% endif %}
+
+      {% set blocking = p.rows|selectattr('num', 'equalto', 1)|selectattr('kind', 'equalto', 'ko')|list %}
+      {% if p.overall_comment %}
+        <div class="c {{ 'c-err' if blocking else 'c-info' }}">
+          <svg class="c-ico" aria-hidden="true"><use href="{{ '#i-err' if blocking else '#i-info' }}"></use></svg>
+          <div>
+            <strong>Synthèse</strong>
+            <p>{{ p.overall_comment }}</p>
+          </div>
+        </div>
+      {% endif %}
+
+      {% if p.priorities %}
+        <div class="block">
+          <h2>Priorités d’amélioration</h2>
+          <div class="prios">
+            {% for item in p.priorities %}
+              <div class="prio is-{{ item.kind }}">
+                <div class="prio-num">{{ '%02d'|format(loop.index) }}</div>
+                <div>
+                  <div class="prio-title-row">
+                    <span class="prio-title">{{ item.name }}</span>
+                    <span class="prio-metric">
+                      Résultat {{ item.value }}{% if item.detail and item.detail != '-' %} ({{ item.detail }}){% endif %} · cible {{ item.target }}
+                    </span>
+                  </div>
+                  <div class="prio-action">{{ item.comment }}</div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="block">
+        <h2>Détail des contrôles</h2>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Contrôle</th>
+                <th>Résultat</th>
+                <th>Cible</th>
+                <th>Verdict</th>
+                <th>Action recommandée</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in p.rows %}
+                <tr>
+                  <td class="is-{{ row.kind }}">{{ row.name }}</td>
+                  <td class="num">
+                    {{ row.value }}
+                    {% if row.detail and row.detail != '-' %}<span class="detail">{{ row.detail }}</span>{% endif %}
+                  </td>
+                  <td class="target">{{ row.target }}</td>
+                  <td><span class="b {{ badge_of.get(row.css, 'b-na') }}">{{ row.verdict }}</span></td>
+                  <td class="comment">{{ row.comment }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {% if p.summary %}
+        <div class="c c-info">
+          <svg class="c-ico" aria-hidden="true"><use href="#i-info"></use></svg>
+          <div><p>{{ p.summary }}</p></div>
+        </div>
+      {% endif %}
+
+      <details class="raw">
+        <summary>Sortie brute — diagnostic DCMA-14</summary>
+        <pre>{{ p.raw }}</pre>
+      </details>
+
+    {% else %}
+      <div class="c c-warn">
+        <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
+        <div>
+          <strong>Aucun contrôle exploité</strong>
+          <p>Le script n’a produit aucune ligne de contrôle lisible pour ce fichier. Vérifier que le planning contient bien des tâches de détail.</p>
+        </div>
+      </div>
+
+      <details class="raw" open>
+        <summary>Sortie brute — diagnostic DCMA-14</summary>
+        <pre>{{ p.raw }}</pre>
+      </details>
+    {% endif %}
+  </section>
+
+  {% else %}
+  {# ===================== RÉSULTAT MONTE CARLO ===================== #}
+  {% set exploitable = (not p.stop_message) and (p.metrics or p.criticality) %}
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>Simulation Monte Carlo</h2>
+        <p class="section-sub">Distribution PERT sur les durées, propagation par le réseau de dépendances.</p>
+      </div>
+      {% if p.stop_message %}
+        <span class="b b-err">Simulation arrêtée</span>
+      {% elif exploitable %}
+        <span class="b b-ok">Simulation exploitable</span>
+      {% else %}
+        <span class="b b-na">Résultat incomplet</span>
+      {% endif %}
+    </div>
+
+    {% if p.info.tasks or p.info.links or p.info.sims or p.network %}
+      <div class="facts">
+        {% if p.info.tasks %}
+          <div class="fact">
+            <span class="fact-label">Tâches de détail</span>
+            <span class="fact-value">{{ p.info.tasks }}</span>
+          </div>
+        {% endif %}
+        {% if p.info.links %}
+          <div class="fact">
+            <span class="fact-label">Liens de dépendance</span>
+            <span class="fact-value">{{ p.info.links }}</span>
+          </div>
+        {% endif %}
+        {% if p.info.sims %}
+          <div class="fact">
+            <span class="fact-label">Simulations</span>
+            <span class="fact-value">{{ p.info.sims }}</span>
+          </div>
+        {% endif %}
+        {% if p.network %}
+          <div class="fact">
+            <span class="fact-label">Densité de liens</span>
+            <span class="fact-value">{{ p.network.ratio_pct }} %</span>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if p.stop_message %}
+      <div class="c c-warn">
+        <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
+        <div>
+          <strong>{{ p.stop_title or "Simulation arrêtée" }}</strong>
+          <p class="pre-line">{{ p.stop_message }}</p>
+          {% if p.stop_action %}<p class="c-action">{{ p.stop_action }}</p>{% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if p.network_warning %}
+      <div class="c c-warn">
+        <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
+        <div>
+          <strong>Réseau peu maillé</strong>
+          <p>{{ p.network_warning }}</p>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if exploitable %}
+      {% if p.metrics %}
+        {% set det = namespace(v=None) %}
+        {% for m in p.metrics %}
+          {% if m.key == 'deterministic' %}{% set det.v = m.value_num %}{% endif %}
+        {% endfor %}
+
+        <div class="block">
+          <h2>Durées simulées</h2>
+          <div class="durations">
+            {% for m in p.metrics %}
+              {% set is_target = (m.key == 'p80') %}
+              <div class="dur{{ ' is-target' if is_target }}{{ ' is-reference' if m.key == 'deterministic' }}">
+                <div class="dur-head">
+                  <span class="dur-label">
+                    {%- if m.key == 'deterministic' %}Déterministe (CPM)
+                    {%- elif m.key == 'p50' %}P50 — médiane
+                    {%- elif m.key == 'p80' %}P80 — 80 % de confiance
+                    {%- elif m.key == 'p90' %}P90 — 90 % de confiance
+                    {%- else %}{{ m.label }}{% endif -%}
+                  </span>
+                  {% if is_target %}<span class="b b-ok b-plain">Recommandé</span>{% endif %}
+                </div>
+                <div class="dur-value">
+                  {%- if m.value_num is not none %}{{ '%.1f'|format(m.value_num) }} j{% else %}{{ m.value }}{% endif -%}
+                </div>
+                <div class="dur-delta">
+                  {%- if m.key == 'deterministic' -%}
+                    référence CPM, pas un engagement
+                  {%- elif det.v is not none and m.value_num is not none -%}
+                    {{ '%+.1f'|format(m.value_num - det.v) }} j vs CPM
+                  {%- else -%}
+                    {{ m.target or "—" }}
+                  {%- endif -%}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+
+          {% set unc = namespace(item=None) %}
+          {% for k in p.kpi %}
+            {% if k.label.startswith('Incertitude') %}{% set unc.item = k %}{% endif %}
+          {% endfor %}
+          {% if unc.item %}
+            <p class="uncertainty">Incertitude P50 → P90 : {{ unc.item.value }} · {{ unc.item.sub }} · repère : {{ unc.item.target }}</p>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% if p.decision %}
+        <div class="decision">
+          <strong>Lecture décisionnelle</strong>
+          <p>{{ p.decision }}</p>
+        </div>
+      {% endif %}
+
+      {% if p.criticality %}
+        <div class="block">
+          <h2>Indice de criticité par tâche</h2>
+          <p class="note">Part des simulations où la tâche est sur le chemin critique. Les 10 tâches les plus critiques sont listées : à surveiller en priorité au-delà de 70 %.</p>
+          <div class="crit">
+            {% for c in p.criticality %}
+              <div class="crit-row">
+                <div class="crit-name">{{ c.name }}</div>
+                <div class="crit-track">
+                  <div class="crit-fill {{ c.css }}" style="width: {{ c.width }}%;"></div>
+                </div>
+                <div class="crit-pct">{{ c.pct }} %</div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    {% endif %}
+
+    {% if p.raw %}
+      <details class="raw"{% if not exploitable %} open{% endif %}>
+        <summary>Sortie brute — simulation Monte Carlo</summary>
+        <pre>{{ p.raw }}</pre>
+      </details>
+    {% endif %}
+  </section>
+  {% endif %}
+{% endfor %}
+{% endblock %}

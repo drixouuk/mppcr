@@ -1,0 +1,20 @@
+services:
+  mppcr:
+    # Pinner une version en production, jamais :latest.
+    image: ghcr.io/drixouuk/mppcr:v1.0.0
+    container_name: mppcr
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - ANALYSIS_TIMEOUT=900
+      - DAILY_ANALYSIS_LIMIT=5   # analyses autorisées par IP et par jour
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Pas de volume : les .mpp sont traités dans un répertoire temporaire
+    # supprimé en fin de requête, et usage.db vit dans la couche writable du
+    # conteneur (réinitialisé à chaque rebuild — comportement voulu).

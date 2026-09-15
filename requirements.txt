@@ -1,0 +1,10 @@
+# Versions figées sur celles du conteneur de référence (relevées via
+# « docker exec mpp pip freeze » sur l'image fonctionnelle), Python 3.11.
+# mpxj et jpype1 sont les deux dépendances sensibles : mpxj embarque les
+# classes Java, jpype1 fait le pont Python/JVM via une extension C compilée.
+Flask==3.1.3
+gunicorn==26.2.0
+mpxj==16.7.0
+JPype1==1.7.1
+numpy==2.4.6
+networkx==3.6.1

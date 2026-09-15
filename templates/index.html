@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}MPPCR — Analyser un planning MS Project{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <p class="app-tag"><b>MPPCR</b> — MS Project Check &amp; Risk</p>
+  <h1 class="page-title">Analyser un planning</h1>
+  <p class="meta-line">Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur un fichier MS Project (.mpp).</p>
+</div>
+
+<div class="card">
+  <form method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
+    <div class="field">
+      <label class="field-label" for="mpp_file">Fichier planning</label>
+      <div class="drop">
+        <div class="drop-body">
+          <span class="drop-title">Sélectionner un fichier <span>— .mpp uniquement, 20 Mo maximum</span></span>
+          <input id="mpp_file" name="mpp_file" type="file" accept=".mpp" required>
+        </div>
+      </div>
+      <span class="field-hint">Le planning est analysé dans un répertoire temporaire supprimé en fin de requête : aucun fichier n’est conservé.</span>
+      <span class="file-name" id="file-name" hidden></span>
+    </div>
+
+    <fieldset class="field">
+      <legend class="field-label">Analyse à exécuter</legend>
+      <div class="choices">
+        <label class="choice">
+          <input type="radio" name="analysis" value="dcma" checked>
+          <span>
+            <span class="choice-title">Diagnostic qualité DCMA-14</span>
+            <span class="choice-desc">14 contrôles qualité avec seuils, cibles et actions recommandées.</span>
+          </span>
+          <span class="choice-check" aria-hidden="true"></span>
+        </label>
+
+        <label class="choice">
+          <input type="radio" name="analysis" value="montecarlo">
+          <span>
+            <span class="choice-title">Simulation Monte Carlo</span>
+            <span class="choice-desc">P50 / P80 / P90, contingence recommandée et indice de criticité par tâche.</span>
+          </span>
+          <span class="choice-check" aria-hidden="true"></span>
+        </label>
+
+        <label class="choice">
+          <input type="radio" name="analysis" value="both">
+          <span>
+            <span class="choice-title">Les deux</span>
+            <span class="choice-desc">Qualité du planning, puis risque de délai.</span>
+          </span>
+          <span class="choice-check" aria-hidden="true"></span>
+        </label>
+      </div>
+    </fieldset>
+
+    <details class="adv">
+      <summary>Options avancées Monte Carlo</summary>
+      <span class="field-hint">Utilisées uniquement si la simulation Monte Carlo est sélectionnée.</span>
+
+      <div class="grid2">
+        <div class="field">
+          <label class="field-label" for="sims">Nombre de simulations</label>
+          <input id="sims" name="sims" type="number" min="1" max="50000" step="1" value="5000">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="opt">Facteur optimiste</label>
+          <input id="opt" name="opt" type="number" step="0.01" min="0.01" value="0.8">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="pess">Facteur pessimiste</label>
+          <input id="pess" name="pess" type="number" step="0.01" min="0.01" value="1.5">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="estimates_file">CSV d’estimations 3 points</label>
+          <input id="estimates_file" name="estimates_file" type="file" accept=".csv">
+          <span class="field-hint">Colonnes : task_id,optimistic,most_likely,pessimistic</span>
+        </div>
+      </div>
+    </details>
+
+    <div class="field">
+      <button class="btn btn-block" type="submit">Lancer l’analyse</button>
+      {% if quota_remaining is not none %}
+        <p class="quota{% if quota_remaining == 0 %} is-empty{% endif %}">
+          {%- if quota_remaining == 0 -%}
+            Quota quotidien atteint : aucune analyse restante aujourd’hui pour votre adresse IP.
+          {%- elif quota_remaining == 1 -%}
+            1 analyse restante aujourd’hui pour votre adresse IP.
+          {%- else -%}
+            {{ quota_remaining }} analyses restantes aujourd’hui pour votre adresse IP.
+          {%- endif -%}
+        </p>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{# Micro-JS strictement optionnel : affiche le nom du fichier choisi. Le
+   formulaire reste entièrement fonctionnel sans JavaScript. #}
+<script>
+  (function () {
+    var input = document.getElementById("mpp_file");
+    var out = document.getElementById("file-name");
+    if (!input || !out) return;
+    input.addEventListener("change", function () {
+      if (input.files && input.files.length) {
+        out.textContent = "Fichier sélectionné : " + input.files[0].name;
+        out.hidden = false;
+      } else {
+        out.textContent = "";
+        out.hidden = true;
+      }
+    });
+  })();
+</script>
+{% endblock %}

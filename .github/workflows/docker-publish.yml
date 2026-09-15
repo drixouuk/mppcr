@@ -1,0 +1,227 @@
+name: Build, test & publish image
+
+# Build multi-architecture (amd64 + arm64) de l'image MPPCR, testée puis
+# publiée sur GitHub Container Registry.
+#
+# Runners natifs : ubuntu-24.04 (amd64) et ubuntu-24.04-arm (arm64). Les runners
+# ARM64 sont gratuits pour les dépôts publics ; si le dépôt devenait privé sans
+# runners ARM, remplacer ubuntu-24.04-arm par ubuntu-24.04 et ajouter
+# docker/setup-qemu-action (voir README, section « Publication de l'image »).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+# Déclarées au niveau du workflow : sans packages: write, le push vers GHCR
+# échoue silencieusement.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. Build natif sur chaque architecture + smoke test de l'image.
+  # ------------------------------------------------------------------
+  test:
+    name: Test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image (native ${{ matrix.arch }})
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: mppcr:test
+          cache-from: type=gha,scope=test-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=test-${{ matrix.arch }}
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --name mppcr-smoke -p 5000:5000 -e DAILY_ANALYSIS_LIMIT=5 mppcr:test
+
+          echo "--- attente de /healthz ---"
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:5000/healthz | grep -q '^ok$'; then
+              echo "/healthz OK après ${i} tentative(s)"
+              break
+            fi
+            if [ "$i" -eq 40 ]; then
+              echo "/healthz indisponible"; docker logs mppcr-smoke; exit 1
+            fi
+            sleep 2
+          done
+
+          echo "--- formulaire ---"
+          curl -fsS http://127.0.0.1:5000/ | grep -q 'MPPCR'
+          curl -fsS http://127.0.0.1:5000/ | grep -q 'analyses restantes'
+
+          echo "--- compteur d'usage (droits d'écriture sur /app/data) ---"
+          docker exec mppcr-smoke test -f /app/data/usage.db
+
+          echo "--- HEALTHCHECK de l'image ---"
+          for i in $(seq 1 20); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' mppcr-smoke)
+            if [ "$status" = "healthy" ]; then echo "conteneur healthy"; break; fi
+            if [ "$i" -eq 20 ]; then echo "status=$status"; docker logs mppcr-smoke; exit 1; fi
+            sleep 5
+          done
+
+          docker logs mppcr-smoke
+          docker rm -f mppcr-smoke
+
+  # ------------------------------------------------------------------
+  # 2. Construction et push par architecture (une image par digest).
+  # ------------------------------------------------------------------
+  publish:
+    name: Publish (${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ------------------------------------------------------------------
+  # 3. Assemblage du manifeste multi-arch et application des tags.
+  # ------------------------------------------------------------------
+  merge:
+    name: Merge manifests
+    needs: publish
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Create multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            $(jq -r '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+  # ------------------------------------------------------------------
+  # 4. Release GitHub automatique sur tag v*.
+  # ------------------------------------------------------------------
+  release:
+    name: GitHub Release
+    needs: merge
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "La release $GITHUB_REF_NAME existe déjà."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
