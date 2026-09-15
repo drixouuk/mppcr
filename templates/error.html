@@ -5,26 +5,27 @@
 {% block title %}{{ title|default('Analyse impossible', true) }} — MPPCR{% endblock %}
 
 {% block topbar_actions %}
-<a class="btn btn-ghost" href="{{ url_for('index') }}">Retour au formulaire</a>
+<a class="btn btn-ghost" href="{{ url_for('index') }}">Nouvelle analyse</a>
 {% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <p class="app-tag"><b>MPPCR</b> — MS Project Check &amp; Risk</p>
-  <h1 class="page-title">{{ title|default('Analyse impossible', true) }}</h1>
-</div>
-
-<div class="card">
-  <div class="c {{ 'c-warn' if v == 'warn' else 'c-err' }}">
-    <svg class="c-ico" aria-hidden="true"><use href="{{ '#i-warn' if v == 'warn' else '#i-err' }}"></use></svg>
-    <div>
-      <strong>Message</strong>
-      <p>{{ message }}</p>
-    </div>
+<section class="view">
+  <div class="page-head">
+    <h1>{{ title|default('Analyse impossible', true) }}</h1>
   </div>
 
-  <div class="head-actions">
-    <a class="btn" href="{{ url_for('index') }}">Analyser un autre planning</a>
+  <div class="callout {{ 'c-warn' if v == 'warn' else 'c-err' }}">
+    {% if v == 'warn' %}
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+    {% else %}
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
+    {% endif %}
+    <div>{{ message }}</div>
   </div>
-</div>
+
+  <a class="btn" href="{{ url_for('index') }}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+    Analyser un autre planning
+  </a>
+</section>
 {% endblock %}

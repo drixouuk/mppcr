@@ -7,320 +7,339 @@
 {% endblock %}
 
 {% block content %}
-{# Correspondance entre les classes produites par app.py et les badges du design. #}
+{# Correspondance entre les classes produites par app.py et la maquette. #}
 {% set badge_of = {'badge-ok': 'b-ok', 'badge-ko': 'b-err', 'badge-info': 'b-info', 'badge-na': 'b-na'} %}
 {% set stamp_of = {'status-ok': 'b-ok', 'status-ko': 'b-err', 'status-na': 'b-na'} %}
+{% set cf_of = {'high': 'cf-high', 'medium': 'cf-med', 'low': 'cf-low'} %}
+{% set cv_of = {'high': 'cv-high', 'medium': 'cv-med', 'low': 'cv-low'} %}
+{% set label_of = {'ok': 'OK', 'ko': 'À corriger', 'info': 'Info', 'na': 'N/A'} %}
+{# Intitulés des 14 contrôles tels que libellés dans la maquette (le script
+   dcma14.py les renvoie sans accents). #}
+{% set names = {
+  1: 'Logic (tâches sans lien amont/aval)',
+  2: 'Leads (lag négatif)',
+  3: 'Lags (lag positif)',
+  4: 'Relations Finish-to-Start',
+  5: 'Contraintes dures',
+  6: 'Marge totale excessive (plus de 44 j)',
+  7: 'Marge totale négative',
+  8: 'Durée excessive (plus de 44 j)',
+  9: 'Dates invalides (vs date d’état)',
+  10: 'Tâches de détail sans ressource',
+  11: 'Tâches terminées en retard vs baseline',
+  12: 'Test chemin critique (CPTest)',
+  13: 'Critical Path Length Index (CPLI)',
+  14: 'Baseline Execution Index (BEI)'
+} %}
 
-<div class="page-head">
-  <p class="app-tag">
-    <b>MPPCR</b> —
-    {%- if results|length > 1 %} Diagnostic qualité DCMA-14 et simulation Monte Carlo
-    {%- elif results[0].kind == 'dcma' %} Diagnostic qualité DCMA-14
-    {%- else %} Simulation Monte Carlo{% endif %}
-  </p>
-  <h1 class="filename">{{ filename }}</h1>
-  <p class="meta-line">
-    {%- if results|length > 1 %}Deux analyses exécutées sur ce planning{% else %}Une analyse exécutée sur ce planning{% endif %}
-  </p>
-</div>
-
+<section class="view">
 {% for result in results %}
   {% set p = result.parsed %}
+  <div class="result">
 
   {% if result.kind == 'dcma' %}
   {# ===================== RÉSULTAT DCMA-14 ===================== #}
-  <section class="card">
-    <div class="section-head">
-      <div>
-        <h2>Diagnostic qualité DCMA-14</h2>
-        {% if p.status %}<p class="section-sub">{{ p.status }}</p>{% endif %}
+  <div class="result-top">
+    <div class="page-head mb-0">
+      <h1>Diagnostic qualité DCMA-14</h1>
+      <div class="chip-row">
+        <span class="file-chip">
+          <svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
+          {{ filename }}
+        </span>
+        {% if p.status and 'NON RENSEIGNEE' not in p.status|upper %}
+          <span class="meta">{{ p.status }}</span>
+        {% endif %}
       </div>
-      {% if p.status_label %}
-        <span class="b {{ stamp_of.get(p.status_css, 'b-na') }}">{{ p.status_label }}</span>
-      {% endif %}
+    </div>
+    {% if p.status_label %}
+      <span class="badge {{ stamp_of.get(p.status_css, 'b-na') }} badge-lg"><span class="dot"></span> {{ p.status_label }}</span>
+    {% endif %}
+  </div>
+
+  {% if p.rows %}
+    {% if p.status and 'NON RENSEIGNEE' in p.status|upper %}
+      <div class="callout c-warn">
+        <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+        <div><b>Date d’état du projet non renseignée</b> — plusieurs contrôles seront N/A. Renseignez-la pour activer les contrôles 9, 11 et 14.</div>
+      </div>
+    {% endif %}
+
+    <div class="kpis">
+      <div class="kpi kpi-total"><div class="kl">Contrôles</div><div class="kv">{{ p.kpi.total }}</div></div>
+      <div class="kpi kpi-ok"><div class="kl">Conformes</div><div class="kv">{{ p.kpi.ok }}</div></div>
+      <div class="kpi kpi-err"><div class="kl">À corriger</div><div class="kv">{{ p.kpi.ko }}</div></div>
+      <div class="kpi kpi-na"><div class="kl">N/A</div><div class="kv">{{ p.kpi.na }}</div></div>
+      <div class="kpi kpi-info"><div class="kl">Info</div><div class="kv">{{ p.kpi.info }}</div></div>
     </div>
 
-    {% if p.rows %}
-      <div class="kpis">
-        <div class="kpi is-info">
-          <div class="kpi-label">Contrôles</div>
-          <div class="kpi-value">{{ p.kpi.total }}</div>
-          <div class="kpi-sub">DCMA-14</div>
-        </div>
-        <div class="kpi is-ok">
-          <div class="kpi-label">Conformes</div>
-          <div class="kpi-value">{{ p.kpi.ok }}</div>
-          <div class="kpi-sub">Cible atteinte</div>
-        </div>
-        <div class="kpi is-ko">
-          <div class="kpi-label">À corriger</div>
-          <div class="kpi-value">{{ p.kpi.ko }}</div>
-          <div class="kpi-sub">Écarts DCMA</div>
-        </div>
-        <div class="kpi is-na">
-          <div class="kpi-label">N/A</div>
-          <div class="kpi-value">{{ p.kpi.na }}</div>
-          <div class="kpi-sub">Données manquantes</div>
-        </div>
-        <div class="kpi is-info">
-          <div class="kpi-label">Info</div>
-          <div class="kpi-value">{{ p.kpi.info }}</div>
-          <div class="kpi-sub">Sans seuil strict</div>
-        </div>
+    {% set blocking = p.rows|selectattr('num', 'equalto', 1)|selectattr('kind', 'equalto', 'ko')|list %}
+    {% if p.overall_comment %}
+      <div class="callout {{ 'c-err' if blocking else 'c-info' }}">
+        {% if blocking %}
+          <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
+        {% else %}
+          <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
+        {% endif %}
+        <div>{{ p.overall_comment }}</div>
       </div>
-
-      {% if p.status and 'NON RENSEIGNEE' in p.status|upper %}
-        <div class="c c-warn">
-          <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
-          <div>
-            <strong>Date d’état non renseignée</strong>
-            <p>Les contrôles qui dépendent de la date d’état (dates invalides, BEI) restent N/A. Renseigner la date d’état du projet dans MS Project, puis relancer l’analyse pour obtenir un diagnostic complet.</p>
-          </div>
-        </div>
-      {% endif %}
-
-      {% set blocking = p.rows|selectattr('num', 'equalto', 1)|selectattr('kind', 'equalto', 'ko')|list %}
-      {% if p.overall_comment %}
-        <div class="c {{ 'c-err' if blocking else 'c-info' }}">
-          <svg class="c-ico" aria-hidden="true"><use href="{{ '#i-err' if blocking else '#i-info' }}"></use></svg>
-          <div>
-            <strong>Synthèse</strong>
-            <p>{{ p.overall_comment }}</p>
-          </div>
-        </div>
-      {% endif %}
-
-      {% if p.priorities %}
-        <div class="block">
-          <h2>Priorités d’amélioration</h2>
-          <div class="prios">
-            {% for item in p.priorities %}
-              <div class="prio is-{{ item.kind }}">
-                <div class="prio-num">{{ '%02d'|format(loop.index) }}</div>
-                <div>
-                  <div class="prio-title-row">
-                    <span class="prio-title">{{ item.name }}</span>
-                    <span class="prio-metric">
-                      Résultat {{ item.value }}{% if item.detail and item.detail != '-' %} ({{ item.detail }}){% endif %} · cible {{ item.target }}
-                    </span>
-                  </div>
-                  <div class="prio-action">{{ item.comment }}</div>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        </div>
-      {% endif %}
-
-      <div class="block">
-        <h2>Détail des contrôles</h2>
-        <div class="table-wrap">
-          <table class="tbl">
-            <thead>
-              <tr>
-                <th>Contrôle</th>
-                <th>Résultat</th>
-                <th>Cible</th>
-                <th>Verdict</th>
-                <th>Action recommandée</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in p.rows %}
-                <tr>
-                  <td class="is-{{ row.kind }}">{{ row.name }}</td>
-                  <td class="num">
-                    {{ row.value }}
-                    {% if row.detail and row.detail != '-' %}<span class="detail">{{ row.detail }}</span>{% endif %}
-                  </td>
-                  <td class="target">{{ row.target }}</td>
-                  <td><span class="b {{ badge_of.get(row.css, 'b-na') }}">{{ row.verdict }}</span></td>
-                  <td class="comment">{{ row.comment }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {% if p.summary %}
-        <div class="c c-info">
-          <svg class="c-ico" aria-hidden="true"><use href="#i-info"></use></svg>
-          <div><p>{{ p.summary }}</p></div>
-        </div>
-      {% endif %}
-
-      <details class="raw">
-        <summary>Sortie brute — diagnostic DCMA-14</summary>
-        <pre>{{ p.raw }}</pre>
-      </details>
-
-    {% else %}
-      <div class="c c-warn">
-        <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
-        <div>
-          <strong>Aucun contrôle exploité</strong>
-          <p>Le script n’a produit aucune ligne de contrôle lisible pour ce fichier. Vérifier que le planning contient bien des tâches de détail.</p>
-        </div>
-      </div>
-
-      <details class="raw" open>
-        <summary>Sortie brute — diagnostic DCMA-14</summary>
-        <pre>{{ p.raw }}</pre>
-      </details>
     {% endif %}
-  </section>
+
+    {% if p.priorities %}
+      <div class="card">
+        <div class="card-head">
+          <h2>Priorités d’amélioration</h2>
+          <span class="meta">{{ p.priorities|length }} action{{ 's' if p.priorities|length > 1 else '' }}</span>
+        </div>
+        <div class="card-pad prio">
+          {% for item in p.priorities %}
+            <div class="prio-item">
+              <div class="prio-num {{ 'pn-err' if item.kind == 'ko' else 'pn-na' }}">{{ '%02d'|format(loop.index) }}</div>
+              <div class="prio-body">
+                <div class="prio-title">
+                  {{ names.get(item.num, item.name) }}
+                  <span class="badge {{ badge_of.get(item.css, 'b-na') }}">{{ label_of.get(item.kind, item.verdict) }}</span>
+                </div>
+                <div class="prio-metric">
+                  {%- if item.kind == 'na' and item.value|upper == 'N/A' -%}
+                    Non évaluable
+                  {%- else -%}
+                    {{ item.value }}{% if item.detail and item.detail != '-' %} ({{ item.detail }}){% endif %}
+                  {%- endif -%}
+                  · <span class="target">cible {{ item.target }}</span>
+                </div>
+                <div class="prio-action">{{ item.comment }}</div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Détail des contrôles</h2>
+        <span class="meta">{{ p.rows|length }} contrôles</span>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Contrôle</th>
+              <th class="num">Résultat</th>
+              <th class="num">Cible</th>
+              <th>Verdict</th>
+              <th>Action recommandée</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in p.rows %}
+              {% if row.num %}
+                {% set nm = names.get(row.num) or (row.name.split('.', 1)[1].strip() if '.' in row.name else row.name) %}
+              {% else %}
+                {% set nm = row.name %}
+              {% endif %}
+              <tr>
+                <td>
+                  <div class="ctrl-name">
+                    {% if row.num %}<span class="idx">{{ row.num }}.</span>{% endif %}{{ nm }}
+                  </div>
+                </td>
+                <td class="num">
+                  <div class="val">{{ row.value }}</div>
+                  {% if row.detail and row.detail != '-' %}<div class="val-sub">{{ row.detail }}</div>{% endif %}
+                </td>
+                <td class="num target-cell">{{ row.target }}</td>
+                <td><span class="badge {{ badge_of.get(row.css, 'b-na') }}" title="{{ row.verdict }}">{{ label_of.get(row.kind, row.verdict) }}</span></td>
+                <td class="act">{{ row.comment }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-raw">
+        <details class="raw">
+          <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
+          <pre>{{ p.raw }}</pre>
+        </details>
+      </div>
+    </div>
+  {% else %}
+    <div class="callout c-warn">
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <div><b>Aucun contrôle exploité</b> — le script n’a produit aucune ligne de contrôle lisible pour ce fichier. Vérifiez que le planning contient des tâches de détail.</div>
+    </div>
+    <details class="raw" open>
+      <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
+      <pre>{{ p.raw }}</pre>
+    </details>
+  {% endif %}
 
   {% else %}
   {# ===================== RÉSULTAT MONTE CARLO ===================== #}
   {% set exploitable = (not p.stop_message) and (p.metrics or p.criticality) %}
-  <section class="card">
-    <div class="section-head">
-      <div>
-        <h2>Simulation Monte Carlo</h2>
-        <p class="section-sub">Distribution PERT sur les durées, propagation par le réseau de dépendances.</p>
+  <div class="result-top">
+    <div class="page-head mb-0">
+      <h1>Simulation Monte Carlo</h1>
+      <div class="chip-row">
+        <span class="file-chip">
+          <svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
+          {{ filename }}
+        </span>
       </div>
-      {% if p.stop_message %}
-        <span class="b b-err">Simulation arrêtée</span>
-      {% elif exploitable %}
-        <span class="b b-ok">Simulation exploitable</span>
-      {% else %}
-        <span class="b b-na">Résultat incomplet</span>
-      {% endif %}
     </div>
-
-    {% if p.info.tasks or p.info.links or p.info.sims or p.network %}
-      <div class="facts">
-        {% if p.info.tasks %}
-          <div class="fact">
-            <span class="fact-label">Tâches de détail</span>
-            <span class="fact-value">{{ p.info.tasks }}</span>
-          </div>
-        {% endif %}
-        {% if p.info.links %}
-          <div class="fact">
-            <span class="fact-label">Liens de dépendance</span>
-            <span class="fact-value">{{ p.info.links }}</span>
-          </div>
-        {% endif %}
-        {% if p.info.sims %}
-          <div class="fact">
-            <span class="fact-label">Simulations</span>
-            <span class="fact-value">{{ p.info.sims }}</span>
-          </div>
-        {% endif %}
-        {% if p.network %}
-          <div class="fact">
-            <span class="fact-label">Densité de liens</span>
-            <span class="fact-value">{{ p.network.ratio_pct }} %</span>
-          </div>
-        {% endif %}
-      </div>
-    {% endif %}
-
     {% if p.stop_message %}
-      <div class="c c-warn">
-        <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
-        <div>
-          <strong>{{ p.stop_title or "Simulation arrêtée" }}</strong>
-          <p class="pre-line">{{ p.stop_message }}</p>
-          {% if p.stop_action %}<p class="c-action">{{ p.stop_action }}</p>{% endif %}
-        </div>
-      </div>
+      <span class="badge b-err badge-lg"><span class="dot"></span> Simulation arrêtée</span>
+    {% elif exploitable %}
+      <span class="badge b-ok badge-lg"><span class="dot"></span> Simulation exploitable</span>
+    {% else %}
+      <span class="badge b-na badge-lg"><span class="dot"></span> Résultat incomplet</span>
     {% endif %}
+  </div>
 
-    {% if p.network_warning %}
-      <div class="c c-warn">
-        <svg class="c-ico" aria-hidden="true"><use href="#i-warn"></use></svg>
-        <div>
-          <strong>Réseau peu maillé</strong>
-          <p>{{ p.network_warning }}</p>
-        </div>
+  {% if p.info.tasks or p.info.links or p.info.sims %}
+    <div class="card card-pad">
+      <div class="facts">
+        {% if p.info.tasks %}<span><b>{{ p.info.tasks }}</b> tâches de détail</span>{% endif %}
+        {% if p.info.links %}<span><b>{{ p.info.links }}</b> liens de dépendance</span>{% endif %}
+        {% if p.info.sims %}<span><b>{{ p.info.sims }}</b> simulations</span>{% endif %}
       </div>
-    {% endif %}
+    </div>
+  {% endif %}
 
-    {% if exploitable %}
-      {% if p.metrics %}
-        {% set det = namespace(v=None) %}
-        {% for m in p.metrics %}
-          {% if m.key == 'deterministic' %}{% set det.v = m.value_num %}{% endif %}
-        {% endfor %}
+  {% if p.stop_message %}
+    <div class="callout c-warn">
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <div>
+        <b>{{ p.stop_title or "Simulation arrêtée" }}</b>
+        <pre>{{ p.stop_message }}</pre>
+        {% if p.stop_action %}<div>{{ p.stop_action }}</div>{% endif %}
+      </div>
+    </div>
+  {% endif %}
 
-        <div class="block">
-          <h2>Durées simulées</h2>
-          <div class="durations">
+  {% if p.network_warning %}
+    <div class="callout c-warn">
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <div><b>Réseau peu maillé</b> — {{ p.network_warning }}</div>
+    </div>
+  {% endif %}
+
+  {% if exploitable %}
+    {% set d = namespace(det=None, p50=None, p80=None, p90=None) %}
+    {% for m in p.metrics %}
+      {% if m.key == 'deterministic' %}{% set d.det = m %}{% endif %}
+      {% if m.key == 'p50' %}{% set d.p50 = m %}{% endif %}
+      {% if m.key == 'p80' %}{% set d.p80 = m %}{% endif %}
+      {% if m.key == 'p90' %}{% set d.p90 = m %}{% endif %}
+    {% endfor %}
+    {% set cpm = d.det.value_num if d.det else None %}
+
+    {% if p.metrics %}
+      <div class="card">
+        <div class="card-head"><h2>Durées simulées</h2><span class="meta">en jours</span></div>
+        <div class="card-pad">
+          <div class="dur-grid">
             {% for m in p.metrics %}
-              {% set is_target = (m.key == 'p80') %}
-              <div class="dur{{ ' is-target' if is_target }}{{ ' is-reference' if m.key == 'deterministic' }}">
-                <div class="dur-head">
-                  <span class="dur-label">
-                    {%- if m.key == 'deterministic' %}Déterministe (CPM)
-                    {%- elif m.key == 'p50' %}P50 — médiane
-                    {%- elif m.key == 'p80' %}P80 — 80 % de confiance
-                    {%- elif m.key == 'p90' %}P90 — 90 % de confiance
-                    {%- else %}{{ m.label }}{% endif -%}
-                  </span>
-                  {% if is_target %}<span class="b b-ok b-plain">Recommandé</span>{% endif %}
+              {% set is_rec = (m.key == 'p80') %}
+              <div class="dur{{ ' is-rec' if is_rec else '' }}">
+                {% if is_rec %}<span class="rec">Recommandé</span>{% endif %}
+                <div class="dl">
+                  {%- if m.key == 'deterministic' %}Déterministe (CPM)
+                  {%- elif m.key == 'p50' %}P50 — Médiane
+                  {%- elif m.key == 'p80' %}P80
+                  {%- elif m.key == 'p90' %}P90 — Prudent
+                  {%- else %}{{ m.label }}{% endif -%}
                 </div>
-                <div class="dur-value">
-                  {%- if m.value_num is not none %}{{ '%.1f'|format(m.value_num) }} j{% else %}{{ m.value }}{% endif -%}
-                </div>
-                <div class="dur-delta">
-                  {%- if m.key == 'deterministic' -%}
-                    référence CPM, pas un engagement
-                  {%- elif det.v is not none and m.value_num is not none -%}
-                    {{ '%+.1f'|format(m.value_num - det.v) }} j vs CPM
+                <div class="dv">
+                  {%- if m.value_num is not none -%}
+                    {{ '%.1f'|format(m.value_num)|replace('.', ',') }}<small>j</small>
                   {%- else -%}
-                    {{ m.target or "—" }}
+                    {{ m.value }}
+                  {%- endif -%}
+                </div>
+                <div class="dd">
+                  {%- if m.key == 'deterministic' -%}
+                    référence, pas un engagement
+                  {%- elif cpm is not none and m.value_num is not none -%}
+                    {{ '%+.1f'|format(m.value_num - cpm)|replace('.', ',') }} j vs CPM
+                  {%- else -%}
+                    {{ m.target or '—' }}
                   {%- endif -%}
                 </div>
               </div>
             {% endfor %}
           </div>
 
-          {% set unc = namespace(item=None) %}
-          {% for k in p.kpi %}
-            {% if k.label.startswith('Incertitude') %}{% set unc.item = k %}{% endif %}
-          {% endfor %}
-          {% if unc.item %}
-            <p class="uncertainty">Incertitude P50 → P90 : {{ unc.item.value }} · {{ unc.item.sub }} · repère : {{ unc.item.target }}</p>
+          {# Échelle visuelle des percentiles : CPM à 3 %, P90 à 95 %,
+             repères intermédiaires interpolés linéairement. #}
+          {% if cpm is not none and d.p90 and d.p90.value_num is not none and (d.p90.value_num - cpm) > 0 %}
+            {% set span = d.p90.value_num - cpm %}
+            <div class="scale" aria-hidden="true">
+              <div class="scale-track"></div>
+              {% if d.p80 and d.p80.value_num is not none %}
+                <div class="scale-fill" style="width:{{ (3 + (d.p80.value_num - cpm) / span * 92)|round(1) }}%"></div>
+              {% endif %}
+              {% for m in [d.det, d.p50, d.p80, d.p90] if m and m.value_num is not none %}
+                <div class="scale-mark{{ ' mk-cpm' if m.key == 'deterministic' else '' }}{{ ' mk-p80' if m.key == 'p80' else '' }}"
+                     style="left:{{ (3 + (m.value_num - cpm) / span * 92)|round(1) }}%">
+                  <div class="ml">{{ 'CPM' if m.key == 'deterministic' else m.key|upper }}</div>
+                  <div class="pin"></div>
+                  <div class="mv">{{ '%.0f'|format(m.value_num) }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          {% if p.decision %}
+            <div class="decision">
+              <svg class="di" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9.7 17h4.6M12 3a7 7 0 00-4 12.7c.6.5 1 1.2 1 2V18h6v-.3c0-.8.4-1.5 1-2A7 7 0 0012 3z"/></svg>
+              <div>
+                <div class="dt">Lecture décisionnelle</div>
+                <div class="db">{{ p.decision }}</div>
+              </div>
+            </div>
           {% endif %}
         </div>
-      {% endif %}
+      </div>
+    {% endif %}
 
-      {% if p.decision %}
-        <div class="decision">
-          <strong>Lecture décisionnelle</strong>
-          <p>{{ p.decision }}</p>
-        </div>
-      {% endif %}
-
-      {% if p.criticality %}
-        <div class="block">
+    {% if p.criticality %}
+      <div class="card">
+        <div class="card-head">
           <h2>Indice de criticité par tâche</h2>
-          <p class="note">Part des simulations où la tâche est sur le chemin critique. Les 10 tâches les plus critiques sont listées : à surveiller en priorité au-delà de 70 %.</p>
+          <span class="meta">% sur le chemin critique</span>
+        </div>
+        <div class="card-pad">
           <div class="crit">
             {% for c in p.criticality %}
               <div class="crit-row">
-                <div class="crit-name">{{ c.name }}</div>
-                <div class="crit-track">
-                  <div class="crit-fill {{ c.css }}" style="width: {{ c.width }}%;"></div>
+                <div class="crit-name" title="{{ c.name }}">{{ c.name }}</div>
+                <div class="crit-bar">
+                  <div class="crit-fill {{ cf_of.get(c.css, 'cf-med') }}" style="width: {{ c.width }}%"></div>
                 </div>
-                <div class="crit-pct">{{ c.pct }} %</div>
+                <div class="crit-val {{ cv_of.get(c.css, 'cv-med') }}">{{ c.pct|replace('.', ',') }} %</div>
               </div>
             {% endfor %}
           </div>
+          <div class="crit-note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 8v4m0 4h.01"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/></svg>
+            Surveiller en priorité les tâches au-delà de 70 % de criticité.
+          </div>
         </div>
-      {% endif %}
+      </div>
     {% endif %}
-
-    {% if p.raw %}
-      <details class="raw"{% if not exploitable %} open{% endif %}>
-        <summary>Sortie brute — simulation Monte Carlo</summary>
-        <pre>{{ p.raw }}</pre>
-      </details>
-    {% endif %}
-  </section>
   {% endif %}
+
+  {% if p.raw %}
+    <details class="raw"{% if not exploitable %} open{% endif %}>
+      <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
+      <pre>{{ p.raw }}</pre>
+    </details>
+  {% endif %}
+  {% endif %}
+
+  </div>
 {% endfor %}
+</section>
 {% endblock %}

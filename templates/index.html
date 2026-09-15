@@ -3,90 +3,88 @@
 {% block title %}MPPCR — Analyser un planning MS Project{% endblock %}
 
 {% block content %}
-<div class="page-head">
-  <p class="app-tag"><b>MPPCR</b> — MS Project Check &amp; Risk</p>
-  <h1 class="page-title">Analyser un planning</h1>
-  <p class="meta-line">Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur un fichier MS Project (.mpp).</p>
-</div>
+<section class="view">
+  <div class="page-head">
+    <h1>Analyser un planning</h1>
+    <p>Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur fichier <code>.mpp</code>.</p>
+  </div>
 
-<div class="card">
-  <form method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
+  <form class="card card-pad" method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
     <div class="field">
-      <label class="field-label" for="mpp_file">Fichier planning</label>
-      <div class="drop">
-        <div class="drop-body">
-          <span class="drop-title">Sélectionner un fichier <span>— .mpp uniquement, 20 Mo maximum</span></span>
-          <input id="mpp_file" name="mpp_file" type="file" accept=".mpp" required>
-        </div>
+      <label class="flabel" for="mpp_file">Fichier planning</label>
+      <div class="drop" id="drop">
+        <input type="file" id="mpp_file" name="mpp_file" accept=".mpp" required>
+        <span class="ic">
+          <svg fill="none" stroke-width="2" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        </span>
+        <div class="t1"><span class="link">Parcourir…</span> ou glisser-déposer</div>
+        <div class="t2">.mpp uniquement · 20 Mo max</div>
+        <div class="fname" id="fname"></div>
       </div>
-      <span class="field-hint">Le planning est analysé dans un répertoire temporaire supprimé en fin de requête : aucun fichier n’est conservé.</span>
-      <span class="file-name" id="file-name" hidden></span>
+      <div class="hint">Le planning est analysé dans un répertoire temporaire supprimé en fin de requête : aucun fichier n’est conservé.</div>
     </div>
 
     <fieldset class="field">
-      <legend class="field-label">Analyse à exécuter</legend>
+      <legend class="flabel">Analyse à exécuter</legend>
       <div class="choices">
-        <label class="choice">
-          <input type="radio" name="analysis" value="dcma" checked>
-          <span>
-            <span class="choice-title">Diagnostic qualité DCMA-14</span>
-            <span class="choice-desc">14 contrôles qualité avec seuils, cibles et actions recommandées.</span>
-          </span>
-          <span class="choice-check" aria-hidden="true"></span>
-        </label>
-
-        <label class="choice">
-          <input type="radio" name="analysis" value="montecarlo">
-          <span>
-            <span class="choice-title">Simulation Monte Carlo</span>
-            <span class="choice-desc">P50 / P80 / P90, contingence recommandée et indice de criticité par tâche.</span>
-          </span>
-          <span class="choice-check" aria-hidden="true"></span>
-        </label>
-
-        <label class="choice">
-          <input type="radio" name="analysis" value="both">
-          <span>
-            <span class="choice-title">Les deux</span>
-            <span class="choice-desc">Qualité du planning, puis risque de délai.</span>
-          </span>
-          <span class="choice-check" aria-hidden="true"></span>
-        </label>
+        <div class="choice">
+          <input type="radio" name="analysis" id="a1" value="dcma" checked>
+          <label for="a1">
+            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Diagnostic qualité DCMA-14</span>
+            <span class="cd">14 contrôles avec cibles et actions recommandées.</span>
+          </label>
+        </div>
+        <div class="choice">
+          <input type="radio" name="analysis" id="a2" value="montecarlo">
+          <label for="a2">
+            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Simulation Monte Carlo</span>
+            <span class="cd">P50 / P80 / P90, contingence recommandée, criticité des tâches.</span>
+          </label>
+        </div>
+        <div class="choice">
+          <input type="radio" name="analysis" id="a3" value="both">
+          <label for="a3">
+            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Les deux</span>
+            <span class="cd">Qualité DCMA puis risque planning.</span>
+          </label>
+        </div>
       </div>
     </fieldset>
 
     <details class="adv">
-      <summary>Options avancées Monte Carlo</summary>
-      <span class="field-hint">Utilisées uniquement si la simulation Monte Carlo est sélectionnée.</span>
-
-      <div class="grid2">
-        <div class="field">
-          <label class="field-label" for="sims">Nombre de simulations</label>
-          <input id="sims" name="sims" type="number" min="1" max="50000" step="1" value="5000">
+      <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Options avancées Monte Carlo</summary>
+      <div class="adv-body">
+        <div class="grid4">
+          <div>
+            <label for="sims">Simulations</label>
+            <input class="in" type="number" id="sims" name="sims" value="5000" min="100" max="50000" step="100">
+          </div>
+          <div>
+            <label for="opt">Facteur optimiste</label>
+            <input class="in" type="number" id="opt" name="opt" value="0.8" step="0.05">
+          </div>
+          <div>
+            <label for="pess">Facteur pessimiste</label>
+            <input class="in" type="number" id="pess" name="pess" value="1.5" step="0.05">
+          </div>
+          <div>
+            <label for="estimates_file">CSV d’estimations</label>
+            <input class="in in-file" type="file" id="estimates_file" name="estimates_file" accept=".csv">
+          </div>
         </div>
-
-        <div class="field">
-          <label class="field-label" for="opt">Facteur optimiste</label>
-          <input id="opt" name="opt" type="number" step="0.01" min="0.01" value="0.8">
-        </div>
-
-        <div class="field">
-          <label class="field-label" for="pess">Facteur pessimiste</label>
-          <input id="pess" name="pess" type="number" step="0.01" min="0.01" value="1.5">
-        </div>
-
-        <div class="field">
-          <label class="field-label" for="estimates_file">CSV d’estimations 3 points</label>
-          <input id="estimates_file" name="estimates_file" type="file" accept=".csv">
-          <span class="field-hint">Colonnes : task_id,optimistic,most_likely,pessimistic</span>
-        </div>
+        <div class="hint">Format CSV : <code>task_id,optimistic,most_likely,pessimistic</code></div>
       </div>
     </details>
 
-    <div class="field">
-      <button class="btn btn-block" type="submit">Lancer l’analyse</button>
-      {% if quota_remaining is not none %}
-        <p class="quota{% if quota_remaining == 0 %} is-empty{% endif %}">
+    <button class="btn btn-block" type="submit">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Lancer l’analyse
+    </button>
+
+    {% if quota_remaining is not none %}
+      <div class="quota{% if quota_remaining == 0 %} is-empty{% endif %}">
+        <span class="pulse"></span>
+        <span>
           {%- if quota_remaining == 0 -%}
             Quota quotidien atteint : aucune analyse restante aujourd’hui pour votre adresse IP.
           {%- elif quota_remaining == 1 -%}
@@ -94,26 +92,43 @@
           {%- else -%}
             {{ quota_remaining }} analyses restantes aujourd’hui pour votre adresse IP.
           {%- endif -%}
-        </p>
-      {% endif %}
-    </div>
+        </span>
+      </div>
+    {% endif %}
   </form>
-</div>
+</section>
 
-{# Micro-JS strictement optionnel : affiche le nom du fichier choisi. Le
-   formulaire reste entièrement fonctionnel sans JavaScript. #}
+{# Confort uniquement : nom du fichier choisi et glisser-déposer. Le formulaire
+   reste entièrement fonctionnel sans JavaScript (l'input natif est superposé
+   à la zone pointillée et ouvre le sélecteur au clic). #}
 <script>
   (function () {
+    var drop = document.getElementById("drop");
     var input = document.getElementById("mpp_file");
-    var out = document.getElementById("file-name");
-    if (!input || !out) return;
-    input.addEventListener("change", function () {
+    var fname = document.getElementById("fname");
+    if (!drop || !input || !fname) return;
+
+    function show() {
       if (input.files && input.files.length) {
-        out.textContent = "Fichier sélectionné : " + input.files[0].name;
-        out.hidden = false;
+        fname.textContent = input.files[0].name;
+        drop.classList.add("hasfile");
       } else {
-        out.textContent = "";
-        out.hidden = true;
+        fname.textContent = "";
+        drop.classList.remove("hasfile");
+      }
+    }
+
+    input.addEventListener("change", show);
+    ["dragover", "dragenter"].forEach(function (e) {
+      drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add("drag"); });
+    });
+    ["dragleave", "drop"].forEach(function (e) {
+      drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.remove("drag"); });
+    });
+    drop.addEventListener("drop", function (ev) {
+      if (ev.dataTransfer && ev.dataTransfer.files.length) {
+        input.files = ev.dataTransfer.files;
+        show();
       }
     });
   })();
