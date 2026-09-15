@@ -2,8 +2,22 @@
 
 {% block title %}{{ filename }} — MPPCR{% endblock %}
 
-{% block topbar_actions %}
-<a class="btn btn-ghost" href="{{ url_for('index') }}">Nouvelle analyse</a>
+{# Barre de navigation de la maquette, sans JavaScript : « Formulaire » est un
+   lien réel, chaque résultat obtenu est une ancre vers sa section. Un résultat
+   non demandé dans cette requête reste affiché mais inerte. #}
+{% block tabs %}
+  {% set kinds = results|map(attribute='kind')|list %}
+  <a class="tab" href="{{ url_for('index') }}"><span class="n">①</span> Formulaire</a>
+  {% if 'dcma' in kinds %}
+    <a class="tab" href="#dcma"{% if kinds[0] == 'dcma' %} aria-current="location"{% endif %}><span class="n">②</span> Résultat DCMA-14</a>
+  {% else %}
+    <span class="tab is-off" aria-disabled="true" title="Aucun diagnostic DCMA-14 dans cette analyse"><span class="n">②</span> Résultat DCMA-14</span>
+  {% endif %}
+  {% if 'montecarlo' in kinds %}
+    <a class="tab" href="#montecarlo"{% if kinds[0] == 'montecarlo' %} aria-current="location"{% endif %}><span class="n">③</span> Résultat Monte Carlo</a>
+  {% else %}
+    <span class="tab is-off" aria-disabled="true" title="Aucune simulation Monte Carlo dans cette analyse"><span class="n">③</span> Résultat Monte Carlo</span>
+  {% endif %}
 {% endblock %}
 
 {% block content %}
@@ -35,7 +49,7 @@
 <section class="view">
 {% for result in results %}
   {% set p = result.parsed %}
-  <div class="result">
+  <div class="result" id="{{ 'dcma' if result.kind == 'dcma' else 'montecarlo' }}">
 
   {% if result.kind == 'dcma' %}
   {# ===================== RÉSULTAT DCMA-14 ===================== #}

@@ -4,10 +4,6 @@
 
 {% block title %}{{ title|default('Analyse impossible', true) }} — MPPCR{% endblock %}
 
-{% block topbar_actions %}
-<a class="btn btn-ghost" href="{{ url_for('index') }}">Nouvelle analyse</a>
-{% endblock %}
-
 {% block content %}
 <section class="view">
   <div class="page-head">

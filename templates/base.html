@@ -78,11 +78,36 @@
     display:grid;place-items:center;color:#fff;font-size:12px;font-weight:800;
   }
   .brand-sub{color:var(--text-3);font-weight:500;font-size:13px;margin-left:2px}
-  .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:10px;min-width:0}
+
+  /* Barre de navigation de la maquette, en liens serveur : aucun JavaScript.
+     L'onglet de la section affichée est marqué au rendu (aria-current), les
+     onglets sans résultat dans cette requête sont inertes (aria-disabled). */
+  .tabs{
+    margin-left:auto;display:flex;gap:4px;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px;
+    overflow-x:auto;scrollbar-width:none;
+  }
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{
+    border:0;background:transparent;cursor:pointer;font:inherit;font-size:13px;font-weight:600;
+    color:var(--text-2);padding:7px 14px;border-radius:7px;transition:.15s;
+    display:flex;align-items:center;gap:7px;
+    flex:none;white-space:nowrap;text-decoration:none;
+  }
+  .tab .n{font-size:11px;color:var(--text-3);font-weight:700}
+  .tab:hover{color:var(--text)}
+  .tab[aria-selected="true"],.tab[aria-current]{
+    background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);
+  }
+  .tab[aria-selected="true"] .n,.tab[aria-current] .n{color:var(--brand)}
+  .tab.is-off{color:var(--text-3);cursor:not-allowed;opacity:.7}
+  .tab.is-off:hover{color:var(--text-3)}
 
   /* ============ LAYOUT ============ */
   .view{padding:36px 0 72px}
   .result + .result{margin-top:44px;padding-top:36px;border-top:1px solid var(--border)}
+  .result{scroll-margin-top:78px}
 
   .page-head{margin-bottom:28px}
   .page-head h1{font-size:24px;letter-spacing:-.02em;font-weight:700}
@@ -345,11 +370,15 @@
     .crit-val{text-align:left}
     .brand-sub{display:none}
     .scale{display:none}
+    .tabs{overflow-x:auto}
   }
   @media (max-width:520px){
     .grid4,.kpis,.dur-grid{grid-template-columns:1fr}
     .wrap{padding:0 16px}
     .view{padding:24px 0 56px}
+    .topbar-in{gap:10px}
+    .tab{padding:6px 10px;font-size:12.5px;gap:5px}
+    .tab .n{font-size:10px}
   }
 
   /* ============ PRINT ============ */
@@ -374,7 +403,15 @@
       MPPCR
       <span class="brand-sub">MS Project Check &amp; Risk</span>
     </a>
-    <div class="topbar-actions">{% block topbar_actions %}{% endblock %}</div>
+    <div class="topbar-actions">
+      <nav class="tabs" aria-label="Sections">
+      {% block tabs %}
+        <span class="tab" aria-current="page"><span class="n">①</span> Formulaire</span>
+        <span class="tab is-off" aria-disabled="true" title="Lancez une analyse pour obtenir ce résultat"><span class="n">②</span> Résultat DCMA-14</span>
+        <span class="tab is-off" aria-disabled="true" title="Lancez une analyse pour obtenir ce résultat"><span class="n">③</span> Résultat Monte Carlo</span>
+      {% endblock %}
+      </nav>
+    </div>
   </div>
 </header>
 
