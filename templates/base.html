@@ -118,6 +118,7 @@
     border-radius:var(--radius);box-shadow:var(--shadow-sm);
   }
   .card + .card{margin-top:20px}
+  .card + .callout{margin-top:20px}
   .card-pad{padding:22px}
   .card-head{
     display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -308,6 +309,22 @@
   .card-raw{padding:0 22px 22px}
   .card-raw details.raw{margin-top:0}
 
+  /* ============ SCORE DE CONFORMITÉ (propre au rendu serveur) ============ */
+  .score{margin-bottom:20px}
+  .score-head{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+  .score-value{
+    font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1;
+    font-variant-numeric:tabular-nums;white-space:nowrap;
+  }
+  .score-value small{font-size:15px;font-weight:600;color:var(--text-3);margin-left:2px}
+  .score-body{flex:1;min-width:0}
+  .score-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .score-meta{font-size:13px;color:var(--text-2);margin-top:4px;font-variant-numeric:tabular-nums}
+  .score-track{height:10px;border-radius:99px;background:var(--na-soft);overflow:hidden;margin-top:16px}
+  .score-fill{height:100%;border-radius:99px;background:var(--fc,var(--brand))}
+  .score details.adv{margin:16px 0 0}
+  .score details.adv .hint + .hint{margin-top:10px}
+
   /* ============ MONTE CARLO ============ */
   .facts{display:flex;gap:26px;flex-wrap:wrap;font-size:13px;color:var(--text-2)}
   .facts b{color:var(--text);font-variant-numeric:tabular-nums}
@@ -377,6 +394,8 @@
     .wrap{padding:0 16px}
     .view{padding:24px 0 56px}
     .topbar-in{gap:10px}
+    .score-value{font-size:28px}
+    .score-head{gap:14px}
     .tab{padding:6px 10px;font-size:12.5px;gap:5px}
     .tab .n{font-size:10px}
   }

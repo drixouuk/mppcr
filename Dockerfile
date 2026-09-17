@@ -34,7 +34,13 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')" || exit 1
 
-# 2 workers suffisent pour l'usage attendu : le compteur d'analyses est partagé
-# entre eux via SQLite, pas via la mémoire du processus.
-# Timeout élevé car Monte Carlo peut prendre du temps selon la taille du planning.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "900", "app:app"]
+# Workers gthread : une analyse Monte Carlo occupe un thread pendant tout le
+# sous-processus JVM, mais subprocess.run() relâche le GIL — les autres threads
+# du même worker continuent donc de servir le formulaire et /healthz. Sans cela,
+# 2 analyses simultanées suffisaient à saturer les 2 workers synchrones et à
+# faire passer le conteneur en unhealthy.
+# Le nombre d'analyses lourdes réellement menées de front reste borné par
+# MAX_CONCURRENT_ANALYSES (défaut 2), partagé entre workers via SQLite.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
+     "--workers", "2", "--threads", "4", "--worker-class", "gthread", \
+     "--timeout", "900", "app:app"]

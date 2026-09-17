@@ -51,6 +51,34 @@
       </div>
     </fieldset>
 
+    <fieldset class="field">
+      <legend class="flabel">Format du résultat</legend>
+      <div class="choices">
+        <div class="choice">
+          <input type="radio" name="format" id="f1" value="page" checked>
+          <label for="f1">
+            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Page web</span>
+            <span class="cd">Résultat affiché dans le navigateur, avec le score et le détail.</span>
+          </label>
+        </div>
+        <div class="choice">
+          <input type="radio" name="format" id="f2" value="csv">
+          <label for="f2">
+            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Fichier CSV</span>
+            <span class="cd">Tableur, séparateur « ; », encodage UTF-8.</span>
+          </label>
+        </div>
+        <div class="choice">
+          <input type="radio" name="format" id="f3" value="xlsx">
+          <label for="f3">
+            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Classeur Excel</span>
+            <span class="cd">Une feuille par analyse, verdicts colorés.</span>
+          </label>
+        </div>
+      </div>
+      <div class="hint">Un export relance l’analyse et décompte une analyse de votre quota, comme l’affichage web.</span>
+    </fieldset>
+
     <details class="adv">
       <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Options avancées Monte Carlo</summary>
       <div class="adv-body">

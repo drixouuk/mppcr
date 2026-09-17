@@ -14,6 +14,11 @@ Deux outils :
   la contingence à prévoir par rapport au chemin critique déterministe (CPM) et
   d'un indice de criticité par tâche (part des simulations où la tâche se
   trouve sur le chemin critique).
+- **Score de conformité** — une note sur 100 (barème MPPCR versionné) qui
+  synthétise les contrôles en tenant compte des données manquantes, plutôt qu'un
+  décompte brut de verdicts.
+- **Exports** — résultat au format CSV ou Excel, choisi au dépôt du formulaire,
+  ou PDF via l'impression du navigateur.
 
 Le projet est défini comme son propre PID (pas de portefeuille multi-projets),
 en français, sans authentification (voir [Sécurité](#sécurité--avertissement)).
@@ -73,18 +78,72 @@ location / {
 | --- | --- | --- |
 | `ANALYSIS_TIMEOUT` | `900` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
 | `DAILY_ANALYSIS_LIMIT` | `5` | Nombre d'analyses autorisées par adresse IP et par jour calendaire. |
+| `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
-le compteur d'usage est écrit par défaut dans `/app/data/usage.db`.
+les compteurs sont écrits par défaut dans `/app/data/usage.db`.
 
-## Limitation d'usage
+## Score de conformité
+
+La page de résultat et les exports affichent un **score sur 100** (`barème v1`) :
+
+- seuls les **contrôles évaluables** sont notés. Le contrôle 12 (CPTest) est une
+  vérification manuelle jamais mesurable ici, le 10 (ressources) un indicateur
+  sans seuil : les deux sont **hors barème**. Un contrôle N/A faute de données ne
+  compte ni comme conforme ni comme faute ;
+- **tous les contrôles notés pèsent le même poids** :
+  `score = 100 × conformes ÷ évalués` ;
+- le score est **plafonné par la complétude** : 75 si la date d'état du projet ou
+  la baseline manque, 60 si les deux manquent. Sans ce plafond, un planning vide
+  obtiendrait 100/100 faute de contrôle mesurable ;
+- bandes : 85 et plus *conforme* · 70 à 84 *acceptable* · 55 à 69 *fragile* ·
+  moins de 55 *insuffisant*.
+
+La méthode DCMA-14 ne définit aucun score composite : celui-ci est une convention
+MPPCR, **versionnée** (affichée sur la page) pour rester comparable d'une analyse
+à l'autre. Le barème est détaillé dans un bloc repliable sur la page de résultat.
+
+## Format du résultat et exports
+
+Le format est choisi **au dépôt du formulaire**, en même temps que le type
+d'analyse — l'export est donc produit dans la même requête, sans aucune
+persistance côté serveur et sans JavaScript :
+
+| Format | Contenu |
+| --- | --- |
+| **Page web** (défaut) | résultat affiché dans le navigateur, score compris |
+| **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : synthèse, score, contrôles, priorités, Monte Carlo, criticité, sorties brutes |
+| **Excel** | une feuille par analyse lancée (« Contrôles DCMA-14 », « Monte Carlo »), verdicts colorés, score en tête |
+
+Un export **relance l'analyse** et décompte donc une analyse du quota, exactement
+comme l'affichage web : le `.mpp` n'étant pas conservé, il n'existe pas de bouton
+« exporter » après coup.
+
+Pour un PDF, utiliser le style d'impression déjà embarqué : **Imprimer →
+Enregistrer au format PDF** depuis la page de résultat.
+
+## Limitation d'usage et concurrence
 
 Sans système de comptes, chaque adresse IP dispose de `DAILY_ANALYSIS_LIMIT`
 analyses par jour calendaire. Le compteur est stocké dans un fichier SQLite
 (`/app/data/usage.db`) partagé par les workers Gunicorn — un compteur en mémoire
-serait incohérent entre les 2 workers. Au-delà du quota, le formulaire refuse la
+serait incohérent entre les workers. Au-delà du quota, le formulaire refuse la
 requête avec une page explicite, sans lancer d'analyse. Le formulaire affiche le
 nombre d'analyses restantes pour l'IP courante.
+
+Le quota n'est décompté **qu'après une analyse réussie** : un fichier illisible,
+un dépassement de délai, une attente sur le sémaphore ou un export interrompu ne
+consomment rien. Le contrôle effectué à l'entrée de la route reste une barrière
+simple : une rafale de requêtes simultanées d'une même IP peut dépasser le quota
+d'au plus `MAX_CONCURRENT_ANALYSES` analyses.
+
+Les analyses lourdes sont bornées par `MAX_CONCURRENT_ANALYSES`, compteur partagé
+via SQLite entre tous les workers et threads. Au-delà, la requête reçoit une page
+« Analyse en cours » (HTTP 503 + `Retry-After`) et **ne consomme pas de quota**.
+Gunicorn tourne en `gthread` (2 workers × 4 threads) : une analyse occupe un
+thread, mais `subprocess.run()` relâche le GIL, si bien que le formulaire et
+`/healthz` restent servis par les autres threads du même worker pendant le calcul
+du sous-processus JVM.
 
 ## Confidentialité
 
@@ -121,7 +180,7 @@ app.py            Interface Flask : parsing des sorties des scripts, cibles DCMA
 dcma14.py         Contrôle qualité DCMA-14 (script CLI d'origine, appelé en subprocess).
 montecarlo.py     Simulation Monte Carlo (script CLI d'origine, appelé en subprocess).
 templates/        Interface web server-rendue (Jinja2), CSS sans framework, sans JS requis.
-Dockerfile        python:3.11-slim + JRE headless (MPXJ/jpype1) + Gunicorn (2 workers).
+Dockerfile        python:3.11-slim + JRE headless (MPXJ/jpype1) + Gunicorn (2 workers gthread × 4 threads).
 ```
 
 `dcma14.py` et `montecarlo.py` ne sont jamais modifiés : ils sont exécutés en
@@ -151,9 +210,8 @@ et ajouter l'étape d'émulation :
         uses: docker/setup-qemu-action@v4
 ```
 
-Le premier push de package crée un paquet GHCR **privé même si le dépôt est
-public** : passer le paquet en public manuellement (Package Settings → Change
-visibility) pour permettre un `docker run` sans authentification.
+Le premier push crée le paquet GHCR : vérifier sa visibilité (Package Settings →
+Change visibility) — un paquet privé empêche le `docker run` sans authentification.
 
 ## Licence
 

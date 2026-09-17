@@ -8,3 +8,5 @@ mpxj==16.7.0
 JPype1==1.7.1
 numpy==2.4.6
 networkx==3.6.1
+# Export Excel : pur Python, aucune sous-dépendance, wheel universelle.
+XlsxWriter==3.2.9

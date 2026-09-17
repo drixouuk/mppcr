@@ -58,6 +58,52 @@ jobs:
           cache-from: type=gha,scope=test-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=test-${{ matrix.arch }}
 
+      - name: Créer un planning de test
+        run: |
+          set -euo pipefail
+          # Projet MSPDI minimal, lu par MPXJ, pour exercer la chaîne complète
+          # (scripts JVM + parsing + score + exports) sans embarquer de .mpp.
+          cat > /tmp/planning.mpp <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Project xmlns="http://schemas.microsoft.com/project">
+            <Name>Planning de test CI</Name>
+            <StatusDate>2026-10-05T08:00:00</StatusDate>
+            <StartDate>2026-09-01T08:00:00</StartDate>
+            <FinishDate>2026-11-30T17:00:00</FinishDate>
+            <MinutesPerDay>480</MinutesPerDay>
+            <Tasks>
+              <Task><UID>1</UID><ID>1</ID><Name>Analyse</Name><Duration>PT80H0M0S</Duration>
+                <DurationFormat>7</DurationFormat><Start>2026-09-01T08:00:00</Start>
+                <Finish>2026-09-14T17:00:00</Finish><PercentComplete>100</PercentComplete>
+                <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+                <Baseline><Number>0</Number><Duration>PT80H0M0S</Duration></Baseline></Task>
+              <Task><UID>2</UID><ID>2</ID><Name>Conception</Name><Duration>PT64H0M0S</Duration>
+                <DurationFormat>7</DurationFormat><Start>2026-09-15T08:00:00</Start>
+                <Finish>2026-09-24T17:00:00</Finish><PercentComplete>50</PercentComplete>
+                <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+                <Baseline><Number>0</Number><Duration>PT64H0M0S</Duration></Baseline>
+                <PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+              <Task><UID>3</UID><ID>3</ID><Name>Developpement</Name><Duration>PT160H0M0S</Duration>
+                <DurationFormat>7</DurationFormat><Start>2026-09-25T08:00:00</Start>
+                <Finish>2026-10-22T17:00:00</Finish><PercentComplete>20</PercentComplete>
+                <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+                <Baseline><Number>0</Number><Duration>PT160H0M0S</Duration></Baseline>
+                <PredecessorLink><PredecessorUID>2</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+              <Task><UID>4</UID><ID>4</ID><Name>Recette</Name><Duration>PT32H0M0S</Duration>
+                <DurationFormat>7</DurationFormat><Start>2026-10-23T08:00:00</Start>
+                <Finish>2026-10-28T17:00:00</Finish><PercentComplete>0</PercentComplete>
+                <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+                <Baseline><Number>0</Number><Duration>PT32H0M0S</Duration></Baseline>
+                <PredecessorLink><PredecessorUID>3</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+            </Tasks>
+          </Project>
+          XML
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          ET.parse("/tmp/planning.mpp")
+          print("planning de test valide (XML bien formé)")
+          PY
+
       - name: Smoke test
         run: |
           set -euo pipefail
@@ -76,11 +122,47 @@ jobs:
           done
 
           echo "--- formulaire ---"
-          curl -fsS http://127.0.0.1:5000/ | grep -q 'MPPCR'
-          curl -fsS http://127.0.0.1:5000/ | grep -q 'analyses restantes'
+          page=$(curl -fsS http://127.0.0.1:5000/)
+          echo "$page" | grep -q 'MPPCR'
+          echo "$page" | grep -q 'analyses restantes'
+          echo "$page" | grep -q 'name="format"'
+          echo "$page" | grep -q 'name="analysis"'
 
-          echo "--- compteur d'usage (droits d'écriture sur /app/data) ---"
+          echo "--- compteur d'usage et verrou (droits d'écriture sur /app/data) ---"
           docker exec mppcr-smoke test -f /app/data/usage.db
+
+          echo "--- analyse réelle : page web avec score ---"
+          curl -fsS -o /tmp/result.html \
+            -F "analysis=both" -F "format=page" -F "sims=500" \
+            -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
+            http://127.0.0.1:5000/analyse
+          grep -q 'class="score"' /tmp/result.html
+          grep -q 'Score de conformité DCMA' /tmp/result.html
+          grep -q 'Comment ce score est calculé' /tmp/result.html
+          grep -q 'Lecture décisionnelle' /tmp/result.html
+          grep -q 'Log4j' /tmp/result.html && { echo "trace Log4j dans la page"; exit 1; }
+          grep -o 'class="score-value"' /tmp/result.html >/dev/null
+
+          echo "--- export CSV ---"
+          curl -fsS -D /tmp/csv.headers -o /tmp/export.csv \
+            -F "analysis=dcma" -F "format=csv" \
+            -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
+            http://127.0.0.1:5000/analyse
+          grep -qi 'content-type: text/csv' /tmp/csv.headers
+          grep -qi 'content-disposition: attachment' /tmp/csv.headers
+          grep -q 'SCORE DE CONFORMITÉ' /tmp/export.csv
+          grep -q 'CONTRÔLES DCMA-14' /tmp/export.csv
+          head -c 3 /tmp/export.csv | grep -q $'\xef\xbb\xbf' || { echo "BOM UTF-8 absent"; exit 1; }
+
+          echo "--- export Excel ---"
+          curl -fsS -D /tmp/xlsx.headers -o /tmp/export.xlsx \
+            -F "analysis=both" -F "format=xlsx" -F "sims=500" \
+            -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
+            http://127.0.0.1:5000/analyse
+          grep -qi 'spreadsheetml.sheet' /tmp/xlsx.headers
+          grep -qi 'content-disposition: attachment' /tmp/xlsx.headers
+          head -c 2 /tmp/export.xlsx | grep -q 'PK' || { echo "XLSX invalide"; exit 1; }
+          test "$(stat -c %s /tmp/export.xlsx)" -gt 5000
 
           echo "--- HEALTHCHECK de l'image ---"
           for i in $(seq 1 20); do

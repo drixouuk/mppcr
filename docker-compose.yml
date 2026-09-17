@@ -7,3 +7,5 @@ services:
       - "5000:5000"
     environment:
       ANALYSIS_TIMEOUT: "900"
+      DAILY_ANALYSIS_LIMIT: "5"
+      MAX_CONCURRENT_ANALYSES: "2"

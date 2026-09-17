@@ -30,25 +30,23 @@
 {% set stamp_of = {'status-ok': 'b-ok', 'status-ko': 'b-err', 'status-na': 'b-na'} %}
 {% set cf_of = {'high': 'cf-high', 'medium': 'cf-med', 'low': 'cf-low'} %}
 {% set cv_of = {'high': 'cv-high', 'medium': 'cv-med', 'low': 'cv-low'} %}
-{% set label_of = {'ok': 'OK', 'ko': 'À corriger', 'info': 'Info', 'na': 'N/A'} %}
-{# Intitulés des 14 contrôles tels que libellés dans la maquette (le script
-   dcma14.py les renvoie sans accents). #}
-{% set names = {
-  1: 'Logic (tâches sans lien amont/aval)',
-  2: 'Leads (lag négatif)',
-  3: 'Lags (lag positif)',
-  4: 'Relations Finish-to-Start',
-  5: 'Contraintes dures',
-  6: 'Marge totale excessive (plus de 44 j)',
-  7: 'Marge totale négative',
-  8: 'Durée excessive (plus de 44 j)',
-  9: 'Dates invalides (vs date d’état)',
-  10: 'Tâches de détail sans ressource',
-  11: 'Tâches terminées en retard vs baseline',
-  12: 'Test chemin critique (CPTest)',
-  13: 'Critical Path Length Index (CPLI)',
-  14: 'Baseline Execution Index (BEI)'
-} %}
+{# Libellés fournis par app.py (source unique, partagée avec les exports CSV/Excel). #}
+{% set label_of = verdicts|default({'ok': 'OK', 'ko': 'À corriger', 'info': 'Info', 'na': 'N/A'}, true) %}
+{% set names = labels|default({}, true) %}
+{# Résultat Monte Carlo de la même page, s'il existe : sert à afficher la
+   contingence et la dispersion à côté du score de conformité. #}
+{% set mc_list = results|selectattr('kind', 'equalto', 'montecarlo')|list %}
+{% set mc_parsed = mc_list[0].parsed if mc_list else None %}
+{% set mcinfo = namespace(det=None, p80=None, disp=None) %}
+{% if mc_parsed %}
+  {% for m in mc_parsed.metrics %}
+    {% if m.key == 'deterministic' %}{% set mcinfo.det = m.value_num %}{% endif %}
+    {% if m.key == 'p80' %}{% set mcinfo.p80 = m.value_num %}{% endif %}
+  {% endfor %}
+  {% for k in mc_parsed.kpi %}
+    {% if k.label.startswith('Incertitude') %}{% set mcinfo.disp = k %}{% endif %}
+  {% endfor %}
+{% endif %}
 
 <section class="view">
 {% for result in results %}
@@ -92,6 +90,74 @@
     </div>
 
     {% set blocking = p.rows|selectattr('num', 'equalto', 1)|selectattr('kind', 'equalto', 'ko')|list %}
+    {% set s = p.score %}
+
+    <div class="card card-pad score">
+      <div class="score-head">
+        <div class="score-value">
+          {%- if s.score is not none %}{{ s.score }}<small>/100</small>{% else %}—<small>/100</small>{% endif -%}
+        </div>
+        <div class="score-body">
+          <div class="score-title">
+            Score de conformité DCMA
+            <span class="badge {{ s.badge_css }}"><span class="dot"></span> {{ s.label }}</span>
+          </div>
+          <div class="score-meta">
+            {{ s.conformes }} conforme{{ 's' if s.conformes > 1 else '' }} sur {{ s.evaluated }} contrôle{{ 's' if s.evaluated > 1 else '' }} évalué{{ 's' if s.evaluated > 1 else '' }}
+            · {{ s.na }} non évaluable{{ 's' if s.na > 1 else '' }}
+            · barème {{ s.version }}
+          </div>
+          {% if s.capped %}
+            <div class="score-meta">
+              Plafonné à {{ s.cap }} : {{ s.missing|join(' et ') }} non renseigné{{ 'e' if s.missing|length > 1 else '' }}
+              ({{ s.base }}/100 avant plafond)
+            </div>
+          {% endif %}
+          {% if mcinfo.p80 is not none and mcinfo.det is not none %}
+            <div class="score-meta">
+              Risque (Monte Carlo) : contingence P80 vs CPM
+              {{ '%+.1f'|format(mcinfo.p80 - mcinfo.det)|replace('.', ',') }} j
+              {%- if mcinfo.disp %} · dispersion P50 → P90 {{ mcinfo.disp.value }} ({{ mcinfo.disp.sub }}){% endif %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="score-track">
+        <div class="score-fill {{ s.band_css }}" style="width: {{ s.score or 0 }}%"></div>
+      </div>
+
+      <details class="adv">
+        <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Comment ce score est calculé (barème {{ s.version }})</summary>
+        <div class="adv-body">
+          <div class="hint">
+            <b>Périmètre.</b> Seuls les contrôles évaluables sont notés. Le contrôle
+            {{ s.excluded|join(' et le ') }} est hors barème : le 12 est une vérification manuelle qui n’est
+            jamais mesurable ici, le 10 un indicateur sans seuil. Un contrôle N/A
+            faute de données ne compte ni comme conforme ni comme faute.
+          </div>
+          <div class="hint">
+            <b>Calcul.</b> Tous les contrôles notés pèsent le même poids :
+            score = 100 × contrôles conformes ÷ contrôles évalués, arrondi à l’entier.
+          </div>
+          <div class="hint">
+            <b>Plafond de complétude.</b> 75 si la date d’état du projet ou la baseline
+            manque, 60 si les deux manquent. Sans ce plafond, un planning vide
+            obtiendrait 100/100 faute de contrôle mesurable.
+          </div>
+          <div class="hint">
+            <b>Bandes.</b> 85 et plus : conforme · 70 à 84 : acceptable · 55 à 69 : fragile ·
+            moins de 55 : insuffisant.
+          </div>
+          <div class="hint">
+            <b>Nature.</b> La méthode DCMA-14 ne définit aucun score composite : celui-ci
+            est une convention MPPCR, versionnée ({{ s.version }}) pour rester comparable
+            d’une analyse à l’autre.
+          </div>
+        </div>
+      </details>
+    </div>
+
     {% if p.overall_comment %}
       <div class="callout {{ 'c-err' if blocking else 'c-info' }}">
         {% if blocking %}
@@ -288,6 +354,16 @@
               </div>
             {% endfor %}
           </div>
+
+          {% set disp = namespace(item=None) %}
+          {% for k in p.kpi %}
+            {% if k.label.startswith('Incertitude') %}{% set disp.item = k %}{% endif %}
+          {% endfor %}
+          {% if disp.item %}
+            <div class="hint">
+              Incertitude P50 → P90 : {{ disp.item.value }} · {{ disp.item.sub }} · repère : {{ disp.item.target }}
+            </div>
+          {% endif %}
 
           {# Échelle visuelle des percentiles : CPM à 3 %, P90 à 95 %,
              repères intermédiaires interpolés linéairement. #}

@@ -8,7 +8,8 @@ Chaque analyse démarre un processus Python/JVM isolé. Le premier appel peut
 
 Limitation d'usage anonyme : chaque adresse IP dispose d'un quota d'analyses
 par jour calendaire (DAILY_ANALYSIS_LIMIT, défaut 5), compté dans un fichier
-SQLite partagé par les workers Gunicorn.
+SQLite partagé par les workers Gunicorn. Le nombre d'analyses lourdes menées
+de front est plafonné par MAX_CONCURRENT_ANALYSES.
 
 POINT D'EXTENSION AUTH :
 Ajouter flask-httpauth ou Flask-BasicAuth, puis protéger index() et analyse().
@@ -17,6 +18,8 @@ Aucune authentification n'est intégrée : voir la section « Sécurité » du
 README avant toute exposition sur Internet.
 """
 
+import csv
+import io
 import os
 import re
 import sqlite3
@@ -24,10 +27,11 @@ import subprocess
 import sys
 import tempfile
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask, render_template, request
+import xlsxwriter
+from flask import Flask, Response, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
@@ -45,6 +49,16 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 
 # Quota d'analyses par adresse IP et par jour calendaire.
 DAILY_ANALYSIS_LIMIT = int(os.environ.get("DAILY_ANALYSIS_LIMIT", "5"))
+
+# Nombre d'analyses lourdes menées de front. Chaque analyse démarre une JVM
+# complète : au-delà de 2, la machine sature avant d'être utile. La valeur est
+# partagée par tous les workers et threads via SQLite.
+MAX_CONCURRENT_ANALYSES = max(int(os.environ.get("MAX_CONCURRENT_ANALYSES", "2")), 1)
+
+# Formats de résultat proposés au dépôt du formulaire. « page » rend le HTML,
+# les autres renvoient directement un fichier : aucune donnée n'est conservée
+# côté serveur, l'analyse et l'export ont lieu dans la même requête.
+RESULT_FORMATS = ("page", "csv", "xlsx")
 
 # Chemin du compteur d'usage dans l'image. USAGE_DB_PATH n'est utile que pour
 # lancer l'application hors conteneur (tests locaux).
@@ -72,7 +86,11 @@ def usage_connect():
 
 
 def init_usage_db():
-    """Crée le fichier et la table de comptage s'ils sont absents (idempotent)."""
+    """Crée le fichier et les tables de comptage s'ils sont absents (idempotent).
+
+    - usage   : quota quotidien par adresse IP ;
+    - running : créneaux d'analyse en cours, partagés par tous les workers.
+    """
     try:
         usage_db_path().parent.mkdir(parents=True, exist_ok=True)
         with closing(usage_connect()) as conn:
@@ -82,6 +100,12 @@ def init_usage_db():
                 "date TEXT NOT NULL, "
                 "count INTEGER NOT NULL DEFAULT 0, "
                 "PRIMARY KEY (ip, date))"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS running ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "ip TEXT NOT NULL, "
+                "started_at TEXT NOT NULL)"
             )
             conn.commit()
     except (sqlite3.Error, OSError):
@@ -148,6 +172,73 @@ def quota_exceeded_message():
     )
 
 
+def acquire_analysis_slot(ip):
+    """Réserve un créneau d'analyse lourde (MAX_CONCURRENT_ANALYSES au total).
+
+    Retourne l'identifiant du créneau, 0 si le compteur est indisponible (on
+    laisse alors passer l'analyse sans protection : la disponibilité du service
+    prime), ou None si tous les créneaux sont occupés.
+
+    L'insertion conditionnelle est atomique : le comptage reste juste entre les
+    workers Gunicorn et leurs threads, contrairement à un sémaphore en mémoire.
+    """
+    started = datetime.now(timezone.utc)
+    stale_before = (started - timedelta(seconds=TIMEOUT_SECONDS + 120)).isoformat()
+    try:
+        with closing(usage_connect()) as conn:
+            # Créneaux orphelins (worker tué en pleine analyse) : purgés pour ne
+            # pas bloquer le service définitivement.
+            conn.execute("DELETE FROM running WHERE started_at < ?", (stale_before,))
+            cursor = conn.execute(
+                "INSERT INTO running (ip, started_at) "
+                "SELECT ?, ? WHERE (SELECT COUNT(*) FROM running) < ?",
+                (ip, started.isoformat(), MAX_CONCURRENT_ANALYSES),
+            )
+            conn.commit()
+            return cursor.lastrowid if cursor.rowcount > 0 else None
+    except (sqlite3.Error, OSError):
+        app.logger.exception("Réservation d'un créneau d'analyse impossible")
+        return 0
+
+
+def release_analysis_slot(slot_id):
+    """Libère un créneau réservé. Sans effet si le compteur était indisponible."""
+    if not slot_id:
+        return
+    try:
+        with closing(usage_connect()) as conn:
+            conn.execute("DELETE FROM running WHERE id = ?", (slot_id,))
+            conn.commit()
+    except (sqlite3.Error, OSError):
+        app.logger.exception("Libération du créneau d'analyse impossible")
+
+
+def busy_message():
+    return (
+        f"{MAX_CONCURRENT_ANALYSES} analyse(s) sont déjà en cours sur ce service. "
+        "Réessayez dans quelques instants : cette tentative n'a pas décompté "
+        "votre quota du jour."
+    )
+
+
+def count_analysis(ip, already_counted):
+    """Décompte l'analyse du quota, une seule fois et après un run_script réussi.
+
+    Un échec de script, une attente sur le sémaphore ou un export interrompu ne
+    consomment donc rien. Le contrôle fait au début de analyse() reste une
+    simple barrière : deux requêtes simultanées d'une même IP peuvent dépasser
+    le quota d'au plus MAX_CONCURRENT_ANALYSES analyses, ce qui est borné.
+    """
+    if already_counted:
+        return True
+    if not consume_quota(ip):
+        app.logger.warning(
+            "Quota épuisé après une analyse réussie (IP %s) : dépassement borné "
+            "par MAX_CONCURRENT_ANALYSES.", ip,
+        )
+    return True
+
+
 init_usage_db()
 
 
@@ -180,11 +271,56 @@ KIND_CSS = {
     "na": "badge-na",
 }
 
+# Intitulés des 14 contrôles tels qu'affichés : le script dcma14.py les renvoie
+# sans accents. Source unique, partagée par la page de résultat et les exports.
+DCMA_LABELS = {
+    1: "Logic (tâches sans lien amont/aval)",
+    2: "Leads (lag négatif)",
+    3: "Lags (lag positif)",
+    4: "Relations Finish-to-Start",
+    5: "Contraintes dures",
+    6: "Marge totale excessive (plus de 44 j)",
+    7: "Marge totale négative",
+    8: "Durée excessive (plus de 44 j)",
+    9: "Dates invalides (vs date d’état)",
+    10: "Tâches de détail sans ressource",
+    11: "Tâches terminées en retard vs baseline",
+    12: "Test chemin critique (CPTest)",
+    13: "Critical Path Length Index (CPLI)",
+    14: "Baseline Execution Index (BEI)",
+}
+
+# Barème du score de conformité. La méthode DCMA-14 ne définit aucun score
+# composite : celui-ci est une convention MPPCR, versionnée et affichée sur la
+# page de résultat. Contrôles exclus du calcul :
+#   - le 12 (CPTest) est une vérification manuelle, jamais mesurable ici ;
+#   - le 10 (ressources) est un indicateur sans seuil, ni conforme ni fautif.
+SCORE_VERSION = "v1"
+SCORE_EXCLUDED = {10, 12}
+# Un contrôle N/A faute de données n'est ni conforme ni fautif : il sort du
+# calcul, mais il plafonne le score — sinon un planning vide obtiendrait 100.
+SCORE_CAP_ONE_MISSING = 75
+SCORE_CAP_TWO_MISSING = 60
+SCORE_BANDS = (
+    (85, "Conforme", "b-ok", "cf-low"),
+    (70, "Acceptable", "b-info", "cf-low"),
+    (55, "Fragile", "b-warn", "cf-med"),
+    (0, "Insuffisant", "b-err", "cf-high"),
+)
+
 MC_LABELS = {
     "deterministic": "Durée déterministe (CPM)",
     "p50": "P50 — médiane simulée",
     "p80": "P80 — 80 % de confiance",
     "p90": "P90 — 90 % de confiance",
+}
+
+# Libellés de verdict affichés (le script renvoie « A CORRIGER » en majuscules).
+VERDICT_LABELS = {
+    "ok": "OK",
+    "ko": "À corriger",
+    "info": "Info",
+    "na": "N/A",
 }
 
 
@@ -408,6 +544,64 @@ def finalize_dcma(parsed):
         parsed["overall_comment"] = "Aucun contrôle analysé."
 
     parsed["priorities"] = build_dcma_priorities(rows)
+    parsed["score"] = dcma_score(parsed)
+
+
+def dcma_score(parsed):
+    """Score de conformité sur 100 (barème MPPCR, version SCORE_VERSION).
+
+    - seuls les contrôles évaluables sont notés : les contrôles 10 et 12 sont
+      hors barème, et un contrôle N/A ne compte ni comme conforme ni comme faute ;
+    - tous les contrôles notés pèsent le même poids ;
+    - le score est plafonné quand une donnée structurante manque (date d'état,
+      baseline), sans quoi un planning vide obtiendrait 100/100.
+    """
+    rows = parsed.get("rows") or []
+    by_num = {row.get("num"): row for row in rows}
+
+    missing = []
+    if by_num.get(9, {}).get("kind") == "na":
+        missing.append("date d’état du projet")
+    if by_num.get(11, {}).get("kind") == "na":
+        missing.append("baseline")
+
+    scored = [row for row in rows if row.get("num") not in SCORE_EXCLUDED]
+    evaluated = [row for row in scored if row.get("kind") in {"ok", "ko"}]
+    conformes = [row for row in evaluated if row.get("kind") == "ok"]
+
+    if len(missing) >= 2:
+        cap = SCORE_CAP_TWO_MISSING
+    elif len(missing) == 1:
+        cap = SCORE_CAP_ONE_MISSING
+    else:
+        cap = 100
+
+    base = round(100 * len(conformes) / len(evaluated)) if evaluated else None
+    score = min(base, cap) if base is not None else None
+
+    label, badge_css, band_css = "Non évaluable", "b-na", "cf-med"
+    if score is not None:
+        for seuil, texte, badge, bande in SCORE_BANDS:
+            if score >= seuil:
+                label, badge_css, band_css = texte, badge, bande
+                break
+
+    return {
+        "version": SCORE_VERSION,
+        "score": score,
+        "base": base,
+        "cap": cap,
+        "capped": base is not None and base > cap,
+        "evaluated": len(evaluated),
+        "conformes": len(conformes),
+        "universe": len(scored),
+        "na": len([row for row in scored if row.get("kind") == "na"]),
+        "missing": missing,
+        "label": label,
+        "badge_css": badge_css,
+        "band_css": band_css,
+        "excluded": sorted(SCORE_EXCLUDED),
+    }
 
 
 def build_dcma_priorities(rows):
@@ -865,6 +1059,368 @@ def run_script(cmd, label):
     return stdout
 
 
+def export_basename(filename):
+    """Nom de fichier d'export, sans accent ni espace : MPPCR_<projet>_<date>."""
+    stem = secure_filename(Path(filename).stem) or "planning"
+    return f"MPPCR_{stem}_{date.today().isoformat()}"
+
+
+def export_response(payload, mimetype, filename):
+    return Response(
+        payload,
+        mimetype=mimetype,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def parsed_by_kind(results, kind):
+    return next((r["parsed"] for r in results if r.get("kind") == kind), None)
+
+
+def dcma_export_rows(parsed):
+    """Tableau des contrôles : n°, contrôle, résultat, détail, cible, verdict, action."""
+    rows = []
+    for row in parsed.get("rows") or []:
+        detail = row.get("detail")
+        rows.append(
+            [
+                row.get("num") or "",
+                DCMA_LABELS.get(row.get("num"), row.get("name") or ""),
+                row.get("value") or "",
+                "" if detail in (None, "-") else detail,
+                row.get("target") or "",
+                VERDICT_LABELS.get(row.get("kind"), row.get("verdict") or ""),
+                row.get("comment") or "",
+            ]
+        )
+    return rows
+
+
+def priority_export_rows(parsed):
+    rows = []
+    for index, item in enumerate(parsed.get("priorities") or [], start=1):
+        rows.append(
+            [
+                f"{index:02d}",
+                DCMA_LABELS.get(item.get("num"), item.get("name") or ""),
+                VERDICT_LABELS.get(item.get("kind"), item.get("verdict") or ""),
+                item.get("value") or "",
+                item.get("target") or "",
+                item.get("comment") or "",
+            ]
+        )
+    return rows
+
+
+def mc_export_rows(parsed):
+    """Durées Monte Carlo avec l'écart calculé par rapport au chemin critique."""
+    det = next((m for m in parsed.get("metrics") or [] if m.get("key") == "deterministic"), None)
+    cpm = det.get("value_num") if det else None
+    rows = []
+    for metric in parsed.get("metrics") or []:
+        value = metric.get("value_num")
+        delta = "" if (cpm is None or value is None) else round(value - cpm, 1)
+        rows.append(
+            [
+                MC_LABELS.get(metric.get("key"), metric.get("label") or ""),
+                "" if value is None else value,
+                delta,
+                metric.get("target") or "",
+                metric.get("comment") or "",
+            ]
+        )
+    return rows
+
+
+def dispersion_export_line(parsed):
+    """Indicateur de dispersion P50 → P90 déjà calculé par enrich_montecarlo()."""
+    for kpi in parsed.get("kpi") or []:
+        if str(kpi.get("label", "")).startswith("Incertitude"):
+            return [kpi.get("label"), kpi.get("value"), kpi.get("sub"), kpi.get("target")]
+    return None
+
+
+def csv_export_payload(results, filename):
+    """CSV séparé par des points-virgules, avec BOM UTF-8 (Excel FR).
+
+    Un seul fichier ne porte pas d'onglets : les sections sont introduites par
+    une ligne « # … ».
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(["MPPCR — MS Project Check & Risk"])
+    writer.writerow(["Fichier analysé", filename])
+    writer.writerow(["Date de l'export", date.today().isoformat()])
+    writer.writerow(["Barème du score de conformité", SCORE_VERSION])
+
+    dcma = parsed_by_kind(results, "dcma")
+    montecarlo = parsed_by_kind(results, "montecarlo")
+
+    if dcma:
+        score = dcma.get("score") or {}
+        writer.writerow([])
+        writer.writerow(["# SCORE DE CONFORMITÉ"])
+        writer.writerow(["Score", score.get("score", ""), "sur 100", score.get("label", "")])
+        if score.get("capped"):
+            writer.writerow(
+                ["Score avant plafond", score.get("base", ""), "plafonné à", score.get("cap", ""),
+                 "; ".join(score.get("missing") or [])]
+            )
+        writer.writerow(["Contrôles évalués", score.get("evaluated", ""), "sur", score.get("universe", "")])
+        writer.writerow(["Contrôles non évaluables", score.get("na", "")])
+        writer.writerow(["Contrôles hors barème", ", ".join(str(n) for n in score.get("excluded") or [])])
+
+        writer.writerow([])
+        writer.writerow(["# SYNTHÈSE DCMA-14"])
+        writer.writerow(["Contrôles analysés", dcma["kpi"]["total"]])
+        writer.writerow(["Conformes", dcma["kpi"]["ok"]])
+        writer.writerow(["À corriger", dcma["kpi"]["ko"]])
+        writer.writerow(["Non applicables", dcma["kpi"]["na"]])
+        writer.writerow(["Informatifs", dcma["kpi"]["info"]])
+        if dcma.get("status"):
+            writer.writerow(["Détail", dcma["status"]])
+
+        writer.writerow([])
+        writer.writerow(["# CONTRÔLES DCMA-14"])
+        writer.writerow(["N°", "Contrôle", "Résultat", "Détail", "Cible", "Verdict", "Action recommandée"])
+        writer.writerows(dcma_export_rows(dcma))
+
+        rows = priority_export_rows(dcma)
+        if rows:
+            writer.writerow([])
+            writer.writerow(["# PRIORITÉS D'AMÉLIORATION"])
+            writer.writerow(["Ordre", "Contrôle", "Verdict", "Résultat", "Cible", "Action recommandée"])
+            writer.writerows(rows)
+
+    if montecarlo:
+        info = montecarlo.get("info") or {}
+        writer.writerow([])
+        writer.writerow(["# SIMULATION MONTE CARLO"])
+        writer.writerow(["Tâches de détail", info.get("tasks", "")])
+        writer.writerow(["Liens de dépendance", info.get("links", "")])
+        writer.writerow(["Simulations", info.get("sims", "")])
+        if montecarlo.get("network"):
+            writer.writerow(["Densité de liens (%)", montecarlo["network"].get("ratio_pct", "")])
+        writer.writerow([])
+        writer.writerow(["Indicateur", "Durée (j)", "Écart vs CPM (j)", "Cible / usage", "Commentaire"])
+        writer.writerows(mc_export_rows(montecarlo))
+
+        dispersion = dispersion_export_line(montecarlo)
+        if dispersion:
+            writer.writerow([])
+            writer.writerow(dispersion)
+
+        if montecarlo.get("decision"):
+            writer.writerow([])
+            writer.writerow(["Lecture décisionnelle"])
+            writer.writerow([montecarlo["decision"]])
+        if montecarlo.get("network_warning"):
+            writer.writerow([])
+            writer.writerow(["Avertissement réseau"])
+            writer.writerow([montecarlo["network_warning"]])
+        if montecarlo.get("stop_message"):
+            writer.writerow([])
+            writer.writerow(["Simulation arrêtée", montecarlo.get("stop_title", "")])
+            writer.writerow([montecarlo["stop_message"]])
+            writer.writerow([montecarlo.get("stop_action") or ""])
+        if montecarlo.get("criticality"):
+            writer.writerow([])
+            writer.writerow(["# INDICE DE CRITICITÉ PAR TÂCHE"])
+            writer.writerow(["Tâche", "Criticité (%)", "Lecture"])
+            for item in montecarlo["criticality"]:
+                writer.writerow([item["name"], item["pct"], item["level"]])
+
+    if dcma and dcma.get("summary"):
+        writer.writerow([])
+        writer.writerow(["# RÉSUMÉ DU SCRIPT DCMA-14"])
+        writer.writerow([dcma["summary"]])
+
+    for kind, titre in (("dcma", "DCMA-14"), ("montecarlo", "MONTE CARLO")):
+        parsed = parsed_by_kind(results, kind)
+        if parsed and parsed.get("raw"):
+            writer.writerow([])
+            writer.writerow([f"# SORTIE BRUTE {titre}"])
+            for line in parsed["raw"].splitlines():
+                writer.writerow([line])
+
+    # BOM UTF-8 : sans lui, Excel FR n'interprète pas les accents.
+    return ("\ufeff" + buffer.getvalue()).encode("utf-8")
+
+
+def xlsx_export_payload(results, filename):
+    """Classeur Excel : une feuille par analyse lancée."""
+    dcma = parsed_by_kind(results, "dcma")
+    montecarlo = parsed_by_kind(results, "montecarlo")
+
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    titre = workbook.add_format({"bold": True, "font_size": 14, "font_color": "#16181d"})
+    entete = workbook.add_format({
+        "bold": True, "bg_color": "#fbfcfd", "border": 1, "border_color": "#e3e6ea",
+        "align": "left", "valign": "vcenter", "text_wrap": True,
+    })
+    libelle = workbook.add_format({"bold": True, "font_color": "#4b5563"})
+    texte = workbook.add_format({"text_wrap": True, "valign": "top"})
+    nombre = workbook.add_format({"num_format": "0.0", "align": "right"})
+    centre = workbook.add_format({"align": "center"})
+    ok_fmt = workbook.add_format({"bg_color": "#e6f7ee", "font_color": "#0f7042", "align": "center"})
+    ko_fmt = workbook.add_format({"bg_color": "#fdecec", "font_color": "#a52f2f", "align": "center"})
+    na_fmt = workbook.add_format({"bg_color": "#eef0f3", "font_color": "#6b7480", "align": "center"})
+    info_fmt = workbook.add_format({"bg_color": "#eef3ff", "font_color": "#1c46c4", "align": "center"})
+    verdict_formats = {"ok": ok_fmt, "ko": ko_fmt, "na": na_fmt, "info": info_fmt}
+    score_fmt = workbook.add_format({"bold": True, "font_size": 16, "font_color": "#1c46c4"})
+
+    if dcma:
+        score = dcma.get("score") or {}
+        sheet = workbook.add_worksheet("Contrôles DCMA-14")
+        sheet.set_column("A:A", 5)
+        sheet.set_column("B:B", 42)
+        sheet.set_column("C:C", 12)
+        sheet.set_column("D:D", 16)
+        sheet.set_column("E:E", 22)
+        sheet.set_column("F:F", 12)
+        sheet.set_column("G:G", 70)
+
+        sheet.write("A1", "MPPCR — Diagnostic qualité DCMA-14", titre)
+        sheet.write("A2", "Fichier analysé", libelle)
+        sheet.write("B2", filename)
+        sheet.write("A3", "Date de l'export", libelle)
+        sheet.write("B3", date.today().isoformat())
+        sheet.write("A4", "Score de conformité", libelle)
+        sheet.write("B4", score.get("score", ""), score_fmt)
+        sheet.write("C4", f"sur 100 — {score.get('label', '')}")
+        if score.get("capped"):
+            sheet.write("D4", f"plafonné à {score.get('cap')} ; "
+                              f"{', '.join(score.get('missing') or [])} non renseigné")
+        sheet.write("A5", "Contrôles évalués", libelle)
+        sheet.write("B5", f"{score.get('evaluated', '')} sur {score.get('universe', '')}")
+        sheet.write("A6", "Non évaluables", libelle)
+        sheet.write("B6", score.get("na", ""))
+        sheet.write("A7", "Barème", libelle)
+        sheet.write("B7", f"score {score.get('version', SCORE_VERSION)} — contrôles "
+                          f"{', '.join(str(n) for n in score.get('excluded') or [])} hors barème")
+
+        row = 9
+        for column, label in enumerate(
+            ["N°", "Contrôle", "Résultat", "Détail", "Cible", "Verdict", "Action recommandée"]
+        ):
+            sheet.write(row, column, label, entete)
+        row += 1
+        for line in dcma_export_rows(dcma):
+            kind = next((r.get("kind") for r in dcma["rows"] if r.get("num") == line[0]), None)
+            for column, value in enumerate(line):
+                if column == 5:
+                    sheet.write(row, column, value, verdict_formats.get(kind, centre))
+                elif column == 6:
+                    sheet.write(row, column, value, texte)
+                else:
+                    sheet.write(row, column, value)
+            row += 1
+
+        rows = priority_export_rows(dcma)
+        if rows:
+            row += 2
+            sheet.write(row, 0, "Priorités d’amélioration", titre)
+            row += 1
+            for column, label in enumerate(
+                ["Ordre", "Contrôle", "Verdict", "Résultat", "Cible", "Action recommandée"]
+            ):
+                sheet.write(row, column, label, entete)
+            row += 1
+            for line in rows:
+                for column, value in enumerate(line):
+                    if column == 5:
+                        sheet.write(row, column, value, texte)
+                    else:
+                        sheet.write(row, column, value)
+                row += 1
+
+    if montecarlo:
+        info = montecarlo.get("info") or {}
+        sheet = workbook.add_worksheet("Monte Carlo")
+        sheet.set_column("A:A", 42)
+        sheet.set_column("B:B", 14)
+        sheet.set_column("C:C", 16)
+        sheet.set_column("D:D", 30)
+        sheet.set_column("E:E", 70)
+
+        sheet.write("A1", "MPPCR — Simulation Monte Carlo", titre)
+        sheet.write("A2", "Fichier analysé", libelle)
+        sheet.write("B2", filename)
+        sheet.write("A3", "Tâches de détail", libelle)
+        sheet.write("B3", info.get("tasks", ""))
+        sheet.write("A4", "Liens de dépendance", libelle)
+        sheet.write("B4", info.get("links", ""))
+        sheet.write("A5", "Simulations", libelle)
+        sheet.write("B5", info.get("sims", ""))
+        if montecarlo.get("network"):
+            sheet.write("A6", "Densité de liens (%)", libelle)
+            sheet.write("B6", montecarlo["network"].get("ratio_pct", ""))
+
+        row = 8
+        for column, label in enumerate(
+            ["Indicateur", "Durée (j)", "Écart vs CPM (j)", "Cible / usage", "Commentaire"]
+        ):
+            sheet.write(row, column, label, entete)
+        row += 1
+        for line in mc_export_rows(montecarlo):
+            sheet.write(row, 0, line[0])
+            if isinstance(line[1], (int, float)):
+                sheet.write_number(row, 1, line[1], nombre)
+            else:
+                sheet.write(row, 1, line[1])
+            if isinstance(line[2], (int, float)):
+                sheet.write_number(row, 2, line[2], nombre)
+            else:
+                sheet.write(row, 2, line[2])
+            sheet.write(row, 3, line[3], texte)
+            sheet.write(row, 4, line[4], texte)
+            row += 1
+
+        dispersion = dispersion_export_line(montecarlo)
+        if dispersion:
+            row += 1
+            sheet.write(row, 0, dispersion[0], libelle)
+            sheet.write(row, 1, dispersion[1])
+            sheet.write(row, 3, dispersion[2] or "")
+            row += 1
+        if montecarlo.get("decision"):
+            row += 1
+            sheet.write(row, 0, "Lecture décisionnelle", libelle)
+            sheet.write(row, 1, montecarlo["decision"], texte)
+            row += 1
+        if montecarlo.get("network_warning"):
+            row += 1
+            sheet.write(row, 0, "Avertissement réseau", libelle)
+            sheet.write(row, 1, montecarlo["network_warning"], texte)
+            row += 1
+        if montecarlo.get("stop_message"):
+            row += 1
+            sheet.write(row, 0, montecarlo.get("stop_title") or "Simulation arrêtée", libelle)
+            sheet.write(row, 1, montecarlo["stop_message"], texte)
+            row += 1
+            sheet.write(row, 1, montecarlo.get("stop_action") or "", texte)
+
+        if montecarlo.get("criticality"):
+            row += 2
+            sheet.write(row, 0, "Indice de criticité par tâche", titre)
+            row += 1
+            for column, label in enumerate(["Tâche", "Criticité (%)", "Lecture"]):
+                sheet.write(row, column, label, entete)
+            row += 1
+            for item in montecarlo["criticality"]:
+                sheet.write(row, 0, item["name"])
+                sheet.write(row, 1, f"{item['pct']} %")
+                sheet.write(row, 2, item["level"])
+                row += 1
+
+    workbook.close()
+    return output.getvalue()
+
+
 @app.errorhandler(413)
 def handle_413(_error):
     return render_template(
@@ -907,10 +1463,14 @@ def analyse():
     if analysis not in {"dcma", "montecarlo", "both"}:
         return render_template("error.html", message="Type d'analyse inconnu."), 400
 
+    result_format = (request.form.get("format") or "page").strip()
+    if result_format not in RESULT_FORMATS:
+        return render_template("error.html", message="Format de résultat inconnu."), 400
+
     ip = client_ip()
 
     # Refus immédiat, sans lire ni valider le fichier, quand le quota du jour est
-    # déjà épuisé. Le contrôle définitif (atomique) est fait par consume_quota().
+    # déjà épuisé. Le compteur n'est incrémenté qu'après une analyse réussie.
     if quota_remaining(ip) == 0:
         return render_template(
             "error.html",
@@ -934,6 +1494,18 @@ def analyse():
             sims, opt, pess = parse_montecarlo_options(request.form)
         except ValueError as exc:
             return render_template("error.html", message=str(exc)), 400
+
+    # Créneau d'analyse : au plus MAX_CONCURRENT_ANALYSES analyses lourdes en
+    # parallèle, tous workers et threads confondus. Une demande refusée ici ne
+    # consomme pas de quota.
+    slot = acquire_analysis_slot(ip)
+    if slot is None:
+        return render_template(
+            "error.html",
+            title="Analyse en cours",
+            variant="warn",
+            message=busy_message(),
+        ), 503, {"Retry-After": "30"}
 
     try:
         with tempfile.TemporaryDirectory(prefix="mppweb_") as tmpdir:
@@ -964,23 +1536,15 @@ def analyse():
                         message="Le fichier CSV d'estimations est vide.",
                     ), 400
 
-            # Le quota est consommé une seule fois, après validation des
-            # fichiers, juste avant de lancer la première analyse.
-            if not consume_quota(ip):
-                return render_template(
-                    "error.html",
-                    title="Quota quotidien atteint",
-                    variant="warn",
-                    message=quota_exceeded_message(),
-                ), 429
-
             results = []
+            quota_counted = False
 
             if analysis in {"dcma", "both"}:
                 stdout = run_script(
                     [sys.executable, str(DCMA_SCRIPT), str(mpp_path)],
                     "le diagnostic DCMA-14",
                 )
+                quota_counted = count_analysis(ip, quota_counted)
                 results.append(
                     {
                         "kind": "dcma",
@@ -1006,6 +1570,7 @@ def analyse():
                     cmd.extend(["--estimates", str(estimates_path)])
 
                 stdout = run_script(cmd, "la simulation Monte Carlo")
+                quota_counted = count_analysis(ip, quota_counted)
                 results.append(
                     {
                         "kind": "montecarlo",
@@ -1015,7 +1580,30 @@ def analyse():
                 )
 
             filename = secure_filename(mpp_file.filename) or "planning.mpp"
-            return render_template("result.html", results=results, filename=filename)
+
+            # Le format est choisi au dépôt du formulaire : l'export est produit
+            # dans la même requête, rien n'est conservé côté serveur.
+            if result_format == "csv":
+                return export_response(
+                    csv_export_payload(results, filename),
+                    "text/csv; charset=utf-8",
+                    export_basename(filename) + ".csv",
+                )
+
+            if result_format == "xlsx":
+                return export_response(
+                    xlsx_export_payload(results, filename),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    export_basename(filename) + ".xlsx",
+                )
+
+            return render_template(
+                "result.html",
+                results=results,
+                filename=filename,
+                labels=DCMA_LABELS,
+                verdicts=VERDICT_LABELS,
+            )
 
     except AnalysisError as exc:
         return render_template("error.html", message=str(exc)), 400
@@ -1026,6 +1614,9 @@ def analyse():
             "error.html",
             message="Une erreur inattendue est survenue pendant l'analyse.",
         ), 500
+
+    finally:
+        release_analysis_slot(slot)
 
 
 if __name__ == "__main__":
