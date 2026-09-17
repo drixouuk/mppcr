@@ -136,12 +136,14 @@ jobs:
             -F "analysis=both" -F "format=page" -F "sims=500" \
             -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
             http://127.0.0.1:5000/analyse
-          grep -q 'class="score"' /tmp/result.html
+          grep -q 'class="card card-pad score"' /tmp/result.html
           grep -q 'Score de conformité DCMA' /tmp/result.html
           grep -q 'Comment ce score est calculé' /tmp/result.html
           grep -q 'Lecture décisionnelle' /tmp/result.html
-          grep -q 'Log4j' /tmp/result.html && { echo "trace Log4j dans la page"; exit 1; }
-          grep -o 'class="score-value"' /tmp/result.html >/dev/null
+          tr -d '\n' < /tmp/result.html | grep -qE 'class="score-value">[[:space:]]*[0-9]+<'
+          if grep -q 'Log4j' /tmp/result.html; then
+            echo "trace Log4j dans la page"; exit 1
+          fi
 
           echo "--- export CSV ---"
           curl -fsS -D /tmp/csv.headers -o /tmp/export.csv \
