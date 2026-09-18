@@ -703,6 +703,35 @@ def build_dcma_priorities(rows):
     return selected[:10]
 
 
+DETAILS_MARKER = "DETAILS_TACHES"
+
+
+def parse_task_details(text):
+    """Bloc « N|id,id,id » produit par dcma14.py --details -> {num: [ids]}.
+
+    Le bloc est émis après la ligne « Resume » : les lecteurs qui s'arrêtent à
+    cette ligne (dont parse_dcma_output) ne sont pas perturbés. La liste est
+    incomplète si le script n'a pas été appelé avec l'option.
+    """
+    details = {}
+    capture = False
+    for line in (text or "").splitlines():
+        contenu = line.strip()
+        if not capture:
+            if DETAILS_MARKER in contenu:
+                capture = True
+            continue
+        if not contenu or set(contenu) == {"="}:
+            continue
+        correspondance = re.match(r"^(\d+)\|(.*)$", contenu)
+        if not correspondance:
+            continue
+        details[int(correspondance.group(1))] = [
+            int(valeur) for valeur in re.findall(r"\d+", correspondance.group(2))
+        ]
+    return details
+
+
 def parse_dcma_output(text):
     parsed = {
         "raw": text,
@@ -715,6 +744,7 @@ def parse_dcma_output(text):
         "status_label": "",
         "status_css": "",
         "priorities": [],
+        "task_details": {},
     }
 
     separator_count = 0
@@ -766,6 +796,7 @@ def parse_dcma_output(text):
                         }
                     )
 
+    parsed["task_details"] = parse_task_details(text)
     finalize_dcma(parsed)
     return parsed
 
@@ -1213,10 +1244,13 @@ def parsed_by_kind(results, kind):
 
 
 def dcma_export_rows(parsed):
-    """Tableau des contrôles : n°, contrôle, résultat, détail, cible, verdict, action."""
+    """Tableau des contrôles : n°, contrôle, résultat, détail, cible, verdict,
+    tâches concernées (N° MS Project, liste complète), action recommandée."""
+    details = parsed.get("task_details") or {}
     rows = []
     for row in parsed.get("rows") or []:
         detail = row.get("detail")
+        identifiants = details.get(row.get("num")) or []
         rows.append(
             [
                 row.get("num") or "",
@@ -1225,6 +1259,7 @@ def dcma_export_rows(parsed):
                 "" if detail in (None, "-") else detail,
                 row.get("target") or "",
                 VERDICT_LABELS.get(row.get("kind"), row.get("verdict") or ""),
+                ", ".join(str(i) for i in identifiants),
                 row.get("comment") or "",
             ]
         )
@@ -1232,8 +1267,10 @@ def dcma_export_rows(parsed):
 
 
 def priority_export_rows(parsed):
+    details = parsed.get("task_details") or {}
     rows = []
     for index, item in enumerate(parsed.get("priorities") or [], start=1):
+        identifiants = details.get(item.get("num")) or []
         rows.append(
             [
                 f"{index:02d}",
@@ -1241,6 +1278,7 @@ def priority_export_rows(parsed):
                 VERDICT_LABELS.get(item.get("kind"), item.get("verdict") or ""),
                 item.get("value") or "",
                 item.get("target") or "",
+                ", ".join(str(i) for i in identifiants),
                 item.get("comment") or "",
             ]
         )
@@ -1317,14 +1355,16 @@ def csv_export_payload(results, filename):
 
         writer.writerow([])
         writer.writerow(["# CONTRÔLES DCMA-14"])
-        writer.writerow(["N°", "Contrôle", "Résultat", "Détail", "Cible", "Verdict", "Action recommandée"])
+        writer.writerow(["N°", "Contrôle", "Résultat", "Détail", "Cible", "Verdict",
+                         "Tâches concernées (N° MS Project)", "Action recommandée"])
         writer.writerows(dcma_export_rows(dcma))
 
         rows = priority_export_rows(dcma)
         if rows:
             writer.writerow([])
             writer.writerow(["# PRIORITÉS D'AMÉLIORATION"])
-            writer.writerow(["Ordre", "Contrôle", "Verdict", "Résultat", "Cible", "Action recommandée"])
+            writer.writerow(["Ordre", "Contrôle", "Verdict", "Résultat", "Cible",
+                             "Tâches concernées (N° MS Project)", "Action recommandée"])
             writer.writerows(rows)
 
     if montecarlo:
@@ -1414,7 +1454,8 @@ def xlsx_export_payload(results, filename):
         sheet.set_column("D:D", 16)
         sheet.set_column("E:E", 22)
         sheet.set_column("F:F", 12)
-        sheet.set_column("G:G", 70)
+        sheet.set_column("G:G", 34)
+        sheet.set_column("H:H", 70)
 
         sheet.write("A1", "MPPCR — Diagnostic qualité DCMA-14", titre)
         sheet.write("A2", "Fichier analysé", libelle)
@@ -1437,7 +1478,8 @@ def xlsx_export_payload(results, filename):
 
         row = 9
         for column, label in enumerate(
-            ["N°", "Contrôle", "Résultat", "Détail", "Cible", "Verdict", "Action recommandée"]
+            ["N°", "Contrôle", "Résultat", "Détail", "Cible", "Verdict",
+             "Tâches concernées (N° MS Project)", "Action recommandée"]
         ):
             sheet.write(row, column, label, entete)
         row += 1
@@ -1446,7 +1488,7 @@ def xlsx_export_payload(results, filename):
             for column, value in enumerate(line):
                 if column == 5:
                     sheet.write(row, column, value, verdict_formats.get(kind, centre))
-                elif column == 6:
+                elif column in (6, 7):
                     sheet.write(row, column, value, texte)
                 else:
                     sheet.write(row, column, value)
@@ -1458,13 +1500,14 @@ def xlsx_export_payload(results, filename):
             sheet.write(row, 0, "Priorités d’amélioration", titre)
             row += 1
             for column, label in enumerate(
-                ["Ordre", "Contrôle", "Verdict", "Résultat", "Cible", "Action recommandée"]
+                ["Ordre", "Contrôle", "Verdict", "Résultat", "Cible",
+                 "Tâches concernées (N° MS Project)", "Action recommandée"]
             ):
                 sheet.write(row, column, label, entete)
             row += 1
             for line in rows:
                 for column, value in enumerate(line):
-                    if column == 5:
+                    if column in (5, 6):
                         sheet.write(row, column, value, texte)
                     else:
                         sheet.write(row, column, value)
@@ -1708,8 +1751,10 @@ def analyse():
             quota_counted = False
 
             if analysis in {"dcma", "both"}:
+                # --details ajoute le bloc « numéros de tâches en écart », qui
+                # alimente la colonne « Tâches (N°) » du tableau.
                 stdout = run_script(
-                    [sys.executable, str(DCMA_SCRIPT), str(mpp_path)],
+                    [sys.executable, str(DCMA_SCRIPT), str(mpp_path), "--details"],
                     "le diagnostic DCMA-14",
                     token=client_token,
                 )

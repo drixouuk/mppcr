@@ -236,6 +236,7 @@
               <th class="num">Résultat</th>
               <th class="num">Cible</th>
               <th>Verdict</th>
+              <th>Tâches concernées (N°)</th>
               <th>Action recommandée</th>
             </tr>
           </thead>
@@ -258,6 +259,14 @@
                 </td>
                 <td class="num target-cell">{{ row.target }}</td>
                 <td><span class="badge {{ badge_of.get(row.css, 'b-na') }}" title="{{ row.verdict }}">{{ label_of.get(row.kind, row.verdict) }}</span></td>
+                <td class="ids">
+                  {%- set identifiants = (p.task_details or {}).get(row.num) or [] -%}
+                  {%- if identifiants -%}
+                    {{ identifiants[:20]|join(', ') }}{% if identifiants|length > 20 %} <span class="val-sub">+{{ identifiants|length - 20 }} autre{{ 's' if identifiants|length - 20 > 1 else '' }}</span>{% endif %}
+                  {%- else -%}
+                    —
+                  {%- endif -%}
+                </td>
                 <td class="act">{{ row.comment }}</td>
               </tr>
             {% endfor %}

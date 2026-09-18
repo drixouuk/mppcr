@@ -145,6 +145,8 @@ jobs:
           grep -q 'Comment ce score est calculé' /tmp/result.html
           grep -q 'Lecture décisionnelle' /tmp/result.html
           tr -d '\n' < /tmp/result.html | grep -qE 'class="score-value">[[:space:]]*[0-9]+<'
+          grep -q 'Tâches concernées (N°)' /tmp/result.html
+          tr -d '\n' < /tmp/result.html | grep -qE 'class="ids">[[:space:]]*[0-9]'
           if grep -q 'Log4j' /tmp/result.html; then
             echo "trace Log4j dans la page"; exit 1
           fi
@@ -167,7 +169,8 @@ jobs:
               sys.exit("BOM UTF-8 absent")
           texte = contenu.decode("utf-8-sig")
           for attendu in ("SCORE DE CONFORMITÉ", "CONTRÔLES DCMA-14",
-                          "Logic (tâches sans lien amont/aval)"):
+                          "Logic (tâches sans lien amont/aval)",
+                          "Tâches concernées (N° MS Project)"):
               if attendu not in texte:
                   sys.exit(f"section absente : {attendu}")
           if "<div" in texte:

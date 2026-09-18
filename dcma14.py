@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 Diagnostic qualite DCMA-14 pour plannings MS Project (.mpp, .mspdi/.xml, etc.)
-Usage: python3 dcma14.py <fichier1> [fichier2 ...]
+Usage: python3 dcma14.py <fichier1> [fichier2 ...] [--details]
+
+L'option --details ajoute, apres la ligne « Resume », un bloc technique listant
+les numeros de tache (colonne N° de MS Project) concernes par chaque controle :
+une ligne « numero_controle|id,id,id », ou « - » si aucune tache n'est en ecart.
+Sans cette option, la sortie est identique a celle des versions precedentes.
 
 Implemente les 14 controles de la methodologie DCMA (Defense Contract
 Management Agency), standard de reference pour l'audit de qualite de
@@ -39,6 +44,47 @@ HARD_CONSTRAINTS = {
     ConstraintType.START_ON,
     ConstraintType.FINISH_ON,
 }
+
+# --- Detail des taches concernees (option --details) -----------------------
+# Chaque controle peut enregistrer ici les numeros de tache (colonne N° de
+# MS Project) des taches en ecart. La collecte est desactivee par defaut : sans
+# l'option --details, le script produit exactement la meme sortie qu'avant.
+COLLECT_DETAILS = False
+TASK_DETAILS = {}
+
+
+def task_id(t):
+    """N° de la tache (colonne ID de MS Project), avec repli sur l'UID."""
+    if t is None:
+        return None
+    for accesseur in ("getID", "getUniqueID"):
+        try:
+            valeur = getattr(t, accesseur)()
+        except Exception:
+            continue
+        if valeur is not None:
+            return int(valeur)
+    return None
+
+
+def record_detail(numero, tasks):
+    """Enregistre les taches en ecart d'un controle (silencieux si non demande)."""
+    if not COLLECT_DETAILS:
+        return
+    identifiants = sorted({tid for tid in (task_id(t) for t in (tasks or []))
+                           if tid is not None})
+    TASK_DETAILS[numero] = identifiants
+
+
+def print_details():
+    """Bloc « N|id,id » lu par l'interface web, un controle par ligne."""
+    print("=" * 72)
+    print("DETAILS_TACHES (numeros MS Project des taches en ecart)")
+    print("=" * 72)
+    for numero in sorted(TASK_DETAILS):
+        identifiants = TASK_DETAILS[numero]
+        print(f"{numero}|{','.join(str(i) for i in identifiants) if identifiants else '-'}")
+    print()
 
 
 def is_real_task(t):
@@ -83,6 +129,7 @@ def check_logic(tasks):
         if t is not project_end:
             bad_tasks.add(t.getUniqueID())
 
+    record_detail(1, [t for t in real if t.getUniqueID() in bad_tasks])
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
@@ -91,6 +138,8 @@ def check_leads_lags(tasks):
     total_rel = 0
     leads = 0
     lags = 0
+    lead_tasks = []
+    lag_tasks = []
     for t in tasks:
         if t is None or t.getPredecessors() is None:
             continue
@@ -100,8 +149,12 @@ def check_leads_lags(tasks):
             lag_val = duration_days(lag)
             if lag_val < 0:
                 leads += 1
+                lead_tasks.append(t)
             elif lag_val > 0:
                 lags += 1
+                lag_tasks.append(t)
+    record_detail(2, lead_tasks)
+    record_detail(3, lag_tasks)
     return (pct(leads, total_rel), leads, total_rel), (pct(lags, total_rel), lags, total_rel)
 
 
@@ -109,6 +162,7 @@ def check_fs_relationships(tasks):
     """4. Relationship types — % de relations Finish-to-Start."""
     total_rel = 0
     fs = 0
+    non_fs_tasks = []
     for t in tasks:
         if t is None or t.getPredecessors() is None:
             continue
@@ -116,6 +170,9 @@ def check_fs_relationships(tasks):
             total_rel += 1
             if rel.getType() == RelationType.FINISH_START:
                 fs += 1
+            else:
+                non_fs_tasks.append(t)
+    record_detail(4, non_fs_tasks)
     return pct(fs, total_rel), fs, total_rel
 
 
@@ -124,8 +181,9 @@ def check_hard_constraints(tasks):
     real = [t for t in tasks if is_real_task(t)]
     if not real:
         return 0.0, 0, 0
-    bad = sum(1 for t in real if t.getConstraintType() in HARD_CONSTRAINTS)
-    return pct(bad, len(real)), bad, len(real)
+    bad_tasks = [t for t in real if t.getConstraintType() in HARD_CONSTRAINTS]
+    record_detail(5, bad_tasks)
+    return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_high_float(tasks):
@@ -133,8 +191,9 @@ def check_high_float(tasks):
     real = [t for t in tasks if is_real_task(t)]
     if not real:
         return 0.0, 0, 0
-    bad = sum(1 for t in real if duration_days(t.getTotalSlack()) > HIGH_FLOAT_DAYS)
-    return pct(bad, len(real)), bad, len(real)
+    bad_tasks = [t for t in real if duration_days(t.getTotalSlack()) > HIGH_FLOAT_DAYS]
+    record_detail(6, bad_tasks)
+    return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_negative_float(tasks):
@@ -142,8 +201,9 @@ def check_negative_float(tasks):
     real = [t for t in tasks if is_real_task(t)]
     if not real:
         return 0.0, 0, 0
-    bad = sum(1 for t in real if duration_days(t.getTotalSlack()) < 0)
-    return pct(bad, len(real)), bad, len(real)
+    bad_tasks = [t for t in real if duration_days(t.getTotalSlack()) < 0]
+    record_detail(7, bad_tasks)
+    return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_high_duration(tasks):
@@ -151,8 +211,9 @@ def check_high_duration(tasks):
     real = [t for t in tasks if is_real_task(t) and not t.getMilestone()]
     if not real:
         return 0.0, 0, 0
-    bad = sum(1 for t in real if duration_days(t.getDuration()) > HIGH_DURATION_DAYS)
-    return pct(bad, len(real)), bad, len(real)
+    bad_tasks = [t for t in real if duration_days(t.getDuration()) > HIGH_DURATION_DAYS]
+    record_detail(8, bad_tasks)
+    return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_invalid_dates(tasks, status_date):
@@ -161,18 +222,19 @@ def check_invalid_dates(tasks, status_date):
     if status_date is None:
         return None, 0, 0
     real = [t for t in tasks if is_real_task(t)]
-    bad = 0
+    bad_tasks = []
     for t in real:
         af = t.getActualFinish()
         if af is not None and af.isAfter(status_date):
-            bad += 1
+            bad_tasks.append(t)
             continue
         finish = t.getFinish()
         pct_complete = t.getPercentageComplete()
         incomplete = pct_complete is None or float(pct_complete) < 100.0
         if incomplete and finish is not None and finish.isBefore(status_date):
-            bad += 1
-    return pct(bad, len(real)), bad, len(real)
+            bad_tasks.append(t)
+    record_detail(9, bad_tasks)
+    return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_resources(tasks):
@@ -181,12 +243,13 @@ def check_resources(tasks):
     real = [t for t in tasks if is_real_task(t) and not t.getMilestone()]
     if not real:
         return 0.0, 0, 0
-    bad = 0
+    bad_tasks = []
     for t in real:
         names = t.getResourceNames()
         if names is None or str(names).strip() == "":
-            bad += 1
-    return pct(bad, len(real)), bad, len(real)
+            bad_tasks.append(t)
+    record_detail(10, bad_tasks)
+    return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_missed_tasks(tasks, status_date):
@@ -194,7 +257,7 @@ def check_missed_tasks(tasks, status_date):
     de reference (baseline). Necessite une baseline renseignee."""
     real = [t for t in tasks if is_real_task(t)]
     checked = 0
-    bad = 0
+    bad_tasks = []
     for t in real:
         bf = t.getBaselineFinish()
         af = t.getActualFinish()
@@ -202,10 +265,11 @@ def check_missed_tasks(tasks, status_date):
             continue
         checked += 1
         if af.isAfter(bf):
-            bad += 1
+            bad_tasks.append(t)
+    record_detail(11, bad_tasks)
     if checked == 0:
         return None, 0, 0
-    return pct(bad, checked), bad, checked
+    return pct(len(bad_tasks), checked), len(bad_tasks), checked
 
 
 def check_bei(tasks, status_date):
@@ -216,6 +280,7 @@ def check_bei(tasks, status_date):
     real = [t for t in tasks if is_real_task(t)]
     should_be_done = 0
     actually_done = 0
+    late_tasks = []
     for t in real:
         bf = t.getBaselineFinish()
         if bf is None or bf.isAfter(status_date):
@@ -224,6 +289,9 @@ def check_bei(tasks, status_date):
         af = t.getActualFinish()
         if af is not None and not af.isAfter(status_date):
             actually_done += 1
+        else:
+            late_tasks.append(t)
+    record_detail(14, late_tasks)
     if should_be_done == 0:
         return None, actually_done, should_be_done
     return round(actually_done / should_be_done, 2), actually_done, should_be_done
@@ -243,6 +311,7 @@ def check_cpli(tasks):
         return None, len(critical)
     max_float = max((duration_days(t.getTotalSlack()) for t in critical), default=0.0)
     cpli = round((cp_length + max_float) / cp_length, 2)
+    record_detail(13, critical)
     return cpli, len(critical)
 
 
@@ -260,6 +329,9 @@ def run_diagnostic(path):
     proj = reader.read(path)
     tasks = list(proj.getTasks())
     status_date = proj.getProjectProperties().getStatusDate()
+
+    if COLLECT_DETAILS:
+        TASK_DETAILS.clear()
 
     print("=" * 72)
     print(f"DIAGNOSTIC DCMA-14 — {path}")
@@ -340,10 +412,19 @@ def run_diagnostic(path):
           f"{len(rows) - n_issues - n_na} OK.")
     print()
 
+    # Bloc technique ajoute uniquement avec --details : il suit la ligne
+    # « Resume », que les lecteurs existants utilisent comme fin de sortie.
+    if COLLECT_DETAILS:
+        print_details()
+
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    arguments = sys.argv[1:]
+    if "--details" in arguments:
+        COLLECT_DETAILS = True
+        arguments = [a for a in arguments if a != "--details"]
+    if not arguments:
         print(__doc__)
         sys.exit(1)
-    for path in sys.argv[1:]:
+    for path in arguments:
         run_diagnostic(path)

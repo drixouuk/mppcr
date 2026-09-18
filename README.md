@@ -103,6 +103,20 @@ La méthode DCMA-14 ne définit aucun score composite : celui-ci est une convent
 MPPCR, **versionnée** (affichée sur la page) pour rester comparable d'une analyse
 à l'autre. Le barème est détaillé dans un bloc repliable sur la page de résultat.
 
+## Tâches concernées
+
+Le tableau des contrôles comporte une colonne **« Tâches concernées (N°) »** : les
+numéros de tâche (colonne N° de MS Project) en écart pour chaque contrôle. Le
+tableau en affiche jusqu'à 20, puis « +N autres » ; les exports CSV et Excel
+contiennent la **liste complète**.
+
+Cette colonne s'appuie sur l'option `--details` de `dcma14.py`, ajoutée pour
+l'occasion : elle n'ajoute qu'un bloc technique à la fin de la sortie, après la
+ligne « Resume ». **Sans cette option, la sortie du script est strictement
+identique** à celle des versions précédentes — une référence figée est comparée
+à chaque exécution des tests. Les contrôles sans écart affichent un tiret, et le
+contrôle 12 (vérification manuelle) n'a pas de liste.
+
 ## Exports
 
 Le résultat est **toujours affiché dans le navigateur**. Les exports sont
@@ -194,7 +208,8 @@ orchestrateur.
 ```
 app.py            Interface Flask : parsing des sorties des scripts, cibles DCMA,
                   commentaires, KPI Monte Carlo, priorités d'action, quota d'usage.
-dcma14.py         Contrôle qualité DCMA-14 (script CLI d'origine, appelé en subprocess).
+dcma14.py         Contrôle qualité DCMA-14 (appelé en subprocess, option --details
+                  pour la liste des N° de tâches en écart).
 montecarlo.py     Simulation Monte Carlo (script CLI d'origine, appelé en subprocess).
 templates/        Interface web server-rendue (Jinja2), CSS sans framework, sans JS requis.
 Dockerfile        python:3.11-slim + JRE headless (MPXJ/jpype1) + Gunicorn (2 workers gthread × 4 threads).
