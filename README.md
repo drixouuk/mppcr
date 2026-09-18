@@ -17,8 +17,8 @@ Deux outils :
 - **Score de conformité** — une note sur 100 (barème MPPCR versionné) qui
   synthétise les contrôles en tenant compte des données manquantes, plutôt qu'un
   décompte brut de verdicts.
-- **Exports** — résultat au format CSV ou Excel, choisi au dépôt du formulaire,
-  ou PDF via l'impression du navigateur.
+- **Exports** — résultat CSV ou Excel demandés en plus de l'affichage, ou PDF
+  via l'impression du navigateur.
 
 Le projet est défini comme son propre PID (pas de portefeuille multi-projets),
 en français, sans authentification (voir [Sécurité](#sécurité--avertissement)).
@@ -103,24 +103,41 @@ La méthode DCMA-14 ne définit aucun score composite : celui-ci est une convent
 MPPCR, **versionnée** (affichée sur la page) pour rester comparable d'une analyse
 à l'autre. Le barème est détaillé dans un bloc repliable sur la page de résultat.
 
-## Format du résultat et exports
+## Exports
 
-Le format est choisi **au dépôt du formulaire**, en même temps que le type
-d'analyse — l'export est donc produit dans la même requête, sans aucune
-persistance côté serveur et sans JavaScript :
+Le résultat est **toujours affiché dans le navigateur**. Les exports sont
+*facultatifs et cumulables* : ils se demandent au dépôt du formulaire, dans le
+volet « Export des résultats (facultatif) », et apparaissent ensuite en boutons
+de téléchargement sur la page de résultat.
 
-| Format | Contenu |
+| Export | Contenu |
 | --- | --- |
-| **Page web** (défaut) | résultat affiché dans le navigateur, score compris |
-| **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : synthèse, score, contrôles, priorités, Monte Carlo, criticité, sorties brutes |
+| **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : score, synthèse, contrôles, priorités, Monte Carlo, criticité, sorties brutes |
 | **Excel** | une feuille par analyse lancée (« Contrôles DCMA-14 », « Monte Carlo »), verdicts colorés, score en tête |
 
-Un export **relance l'analyse** et décompte donc une analyse du quota, exactement
-comme l'affichage web : le `.mpp` n'étant pas conservé, il n'existe pas de bouton
-« exporter » après coup.
+Les fichiers sont produits dans la même requête que l'affichage et **encodés dans
+la page elle-même** (`data:`) : aucune écriture côté serveur, aucune requête
+supplémentaire, aucun JavaScript, et un simple clic suffit à télécharger. Un même
+lancement peut demander les deux exports : il ne décompte qu'**une** analyse du
+quota.
 
 Pour un PDF, utiliser le style d'impression déjà embarqué : **Imprimer →
 Enregistrer au format PDF** depuis la page de résultat.
+
+## Attente et arrêt d'une analyse
+
+Le calcul dure de quelques secondes à plusieurs minutes (démarrage de la JVM,
+puis simulation). Deux aides, en amélioration progressive : sans JavaScript, la
+soumission du formulaire se comporte exactement comme avant.
+
+- **Attente** : à l'envoi du formulaire, une page d'attente affiche le temps
+  écoulé, les étapes prévues (diagnostic DCMA-14, simulation Monte Carlo) et un
+  rappel si l'analyse dépasse la minute. Elle disparaît d'elle-même dès que le
+  résultat arrive.
+- **Arrêt** : le bouton « Arrêter l'analyse » transmet une demande d'annulation
+  (jeton aléatoire de 32 caractères, lié à l'adresse IP qui a lancé l'analyse).
+  Le script en cours est interrompu, JVM comprise, et **aucune analyse n'est
+  décomptée** du quota.
 
 ## Limitation d'usage et concurrence
 
@@ -132,8 +149,8 @@ requête avec une page explicite, sans lancer d'analyse. Le formulaire affiche l
 nombre d'analyses restantes pour l'IP courante.
 
 Le quota n'est décompté **qu'après une analyse réussie** : un fichier illisible,
-un dépassement de délai, une attente sur le sémaphore ou un export interrompu ne
-consomment rien. Le contrôle effectué à l'entrée de la route reste une barrière
+un dépassement de délai, une attente sur le sémaphore ou une analyse arrêtée par
+le visiteur ne consomment rien. Le contrôle effectué à l'entrée de la route reste une barrière
 simple : une rafale de requêtes simultanées d'une même IP peut dépasser le quota
 d'au plus `MAX_CONCURRENT_ANALYSES` analyses.
 

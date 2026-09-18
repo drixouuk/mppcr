@@ -48,6 +48,29 @@
   {% endfor %}
 {% endif %}
 
+{% if downloads %}
+{# Fichiers demandés au dépôt du formulaire : encodés dans la page (data:),
+   aucun stockage côté serveur, téléchargement sans JavaScript. #}
+<div class="card no-print">
+  <div class="card-head">
+    <h2>Exports disponibles</h2>
+    <span class="meta">{{ downloads|length }} fichier{{ 's' if downloads|length > 1 else '' }}</span>
+  </div>
+  <div class="card-pad">
+    <div class="hint">Générés à partir de cette analyse, téléchargeables directement depuis cette page.</div>
+    <div class="chip-row">
+      {% for d in downloads %}
+        <a class="btn" download="{{ d.filename }}" href="{{ d.href }}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+          {{ d.label }} · {{ (d.size / 1024)|round(1)|replace('.', ',') }} Ko
+        </a>
+      {% endfor %}
+    </div>
+    <div class="hint">Pour un PDF, ouvrez l’impression du navigateur depuis cette page.</div>
+  </div>
+</div>
+{% endif %}
+
 <section class="view">
 {% for result in results %}
   {% set p = result.parsed %}

@@ -125,15 +125,19 @@ jobs:
           page=$(curl -fsS http://127.0.0.1:5000/)
           echo "$page" | grep -q 'MPPCR'
           echo "$page" | grep -q 'analyses restantes'
-          echo "$page" | grep -q 'name="format"'
+          echo "$page" | grep -q 'name="export"'
           echo "$page" | grep -q 'name="analysis"'
+          echo "$page" | grep -q 'name="client_token"'
+          echo "$page" | grep -q 'Export des résultats (facultatif)'
+          echo "$page" | grep -q 'id="waiting" hidden'
+          echo "$page" | grep -q 'id="cancel-btn"'
 
           echo "--- compteur d'usage et verrou (droits d'écriture sur /app/data) ---"
           docker exec mppcr-smoke test -f /app/data/usage.db
 
           echo "--- analyse réelle : page web avec score ---"
           curl -fsS -o /tmp/result.html \
-            -F "analysis=both" -F "format=page" -F "sims=500" \
+            -F "analysis=both" -F "sims=500" \
             -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
             http://127.0.0.1:5000/analyse
           grep -q 'class="card card-pad score"' /tmp/result.html
@@ -145,26 +149,61 @@ jobs:
             echo "trace Log4j dans la page"; exit 1
           fi
 
-          echo "--- export CSV ---"
-          curl -fsS -D /tmp/csv.headers -o /tmp/export.csv \
-            -F "analysis=dcma" -F "format=csv" \
+          echo "--- export CSV demandé en plus de la page ---"
+          curl -fsS -o /tmp/result-csv.html \
+            -F "analysis=dcma" -F "export=csv" \
             -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
             http://127.0.0.1:5000/analyse
-          grep -qi 'content-type: text/csv' /tmp/csv.headers
-          grep -qi 'content-disposition: attachment' /tmp/csv.headers
-          grep -q 'SCORE DE CONFORMITÉ' /tmp/export.csv
-          grep -q 'CONTRÔLES DCMA-14' /tmp/export.csv
-          head -c 3 /tmp/export.csv | grep -q $'\xef\xbb\xbf' || { echo "BOM UTF-8 absent"; exit 1; }
+          grep -q 'Exports disponibles' /tmp/result-csv.html
+          grep -q 'Contrôles DCMA-14\|Détail des contrôles' /tmp/result-csv.html
+          python3 - <<'PY'
+          import base64, re, sys
+          html = open("/tmp/result-csv.html", encoding="utf-8").read()
+          lien = re.search(r'href="data:text/csv;base64,([^"]+)"', html)
+          if not lien:
+              sys.exit("lien CSV absent de la page")
+          contenu = base64.b64decode(lien.group(1))
+          if not contenu.startswith(b"\xef\xbb\xbf"):
+              sys.exit("BOM UTF-8 absent")
+          texte = contenu.decode("utf-8-sig")
+          for attendu in ("SCORE DE CONFORMITÉ", "CONTRÔLES DCMA-14",
+                          "Logic (tâches sans lien amont/aval)"):
+              if attendu not in texte:
+                  sys.exit(f"section absente : {attendu}")
+          if "<div" in texte:
+              sys.exit("HTML dans le CSV")
+          print(f"CSV OK ({len(contenu)} octets)")
+          PY
 
-          echo "--- export Excel ---"
-          curl -fsS -D /tmp/xlsx.headers -o /tmp/export.xlsx \
-            -F "analysis=both" -F "format=xlsx" -F "sims=500" \
+          echo "--- export Excel demandé en plus de la page ---"
+          curl -fsS -o /tmp/result-xlsx.html \
+            -F "analysis=both" -F "export=xlsx" -F "sims=500" \
             -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
             http://127.0.0.1:5000/analyse
-          grep -qi 'spreadsheetml.sheet' /tmp/xlsx.headers
-          grep -qi 'content-disposition: attachment' /tmp/xlsx.headers
-          head -c 2 /tmp/export.xlsx | grep -q 'PK' || { echo "XLSX invalide"; exit 1; }
-          test "$(stat -c %s /tmp/export.xlsx)" -gt 5000
+          python3 - <<'PY'
+          import base64, io, re, sys, zipfile
+          html = open("/tmp/result-xlsx.html", encoding="utf-8").read()
+          lien = re.search(
+              r'href="data:application/vnd\.openxmlformats-officedocument'
+              r'\.spreadsheetml\.sheet;base64,([^"]+)"', html)
+          if not lien:
+              sys.exit("lien Excel absent de la page")
+          classeur = base64.b64decode(lien.group(1))
+          if classeur[:2] != b"PK":
+              sys.exit("classeur invalide")
+          with zipfile.ZipFile(io.BytesIO(classeur)) as archive:
+              feuilles = archive.read("xl/workbook.xml").decode("utf-8")
+          if "Contrôles DCMA-14" not in feuilles or "Monte Carlo" not in feuilles:
+              sys.exit("feuilles attendues absentes")
+          print(f"XLSX OK ({len(classeur)} octets)")
+          PY
+
+          echo "--- arrêt d'analyse ---"
+          jeton=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:5000/annuler/$jeton")
+          [ "$code" = "404" ] || { echo "annuler/inexistant -> $code au lieu de 404"; exit 1; }
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:5000/annuler/zzz")
+          [ "$code" = "400" ] || { echo "annuler/jeton invalide -> $code au lieu de 400"; exit 1; }
 
           echo "--- HEALTHCHECK de l'image ---"
           for i in $(seq 1 20); do

@@ -9,7 +9,9 @@
     <p>Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur fichier <code>.mpp</code>.</p>
   </div>
 
-  <form class="card card-pad" method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
+  <form class="card card-pad" id="analyse-form" method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
+    {# Jeton d'annulation : permet d'interrompre l'analyse depuis la page d'attente. #}
+    <input type="hidden" name="client_token" id="client_token" value="{{ client_token }}">
     <div class="field">
       <label class="flabel" for="mpp_file">Fichier planning</label>
       <div class="drop" id="drop">
@@ -51,33 +53,32 @@
       </div>
     </fieldset>
 
-    <fieldset class="field">
-      <legend class="flabel">Format du résultat</legend>
-      <div class="choices">
-        <div class="choice">
-          <input type="radio" name="format" id="f1" value="page" checked>
-          <label for="f1">
-            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Page web</span>
-            <span class="cd">Résultat affiché dans le navigateur, avec le score et le détail.</span>
-          </label>
+    <details class="adv">
+      <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Export des résultats (facultatif)</summary>
+      <div class="adv-body">
+        <div class="hint">
+          Les résultats sont toujours affichés dans le navigateur. Cochez pour obtenir
+          en plus un fichier à télécharger depuis la page de résultat. Pour un PDF,
+          utilisez ensuite l’impression du navigateur.
         </div>
-        <div class="choice">
-          <input type="radio" name="format" id="f2" value="csv">
-          <label for="f2">
-            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Fichier CSV</span>
-            <span class="cd">Tableur, séparateur « ; », encodage UTF-8.</span>
-          </label>
-        </div>
-        <div class="choice">
-          <input type="radio" name="format" id="f3" value="xlsx">
-          <label for="f3">
-            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Classeur Excel</span>
-            <span class="cd">Une feuille par analyse, verdicts colorés.</span>
-          </label>
+        <div class="choices is-pair">
+          <div class="choice">
+            <input type="checkbox" name="export" id="x1" value="csv">
+            <label for="x1">
+              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Fichier CSV</span>
+              <span class="cd">Tableur, séparateur « ; », encodage UTF-8.</span>
+            </label>
+          </div>
+          <div class="choice">
+            <input type="checkbox" name="export" id="x2" value="xlsx">
+            <label for="x2">
+              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Classeur Excel</span>
+              <span class="cd">Une feuille par analyse, verdicts colorés.</span>
+            </label>
+          </div>
         </div>
       </div>
-      <div class="hint">Un export relance l’analyse et décompte une analyse de votre quota, comme l’affichage web.</span>
-    </fieldset>
+    </details>
 
     <details class="adv">
       <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Options avancées Monte Carlo</summary>
@@ -126,6 +127,34 @@
   </form>
 </section>
 
+{# Page d'attente affichée par le JavaScript au moment de l'envoi : le
+   formulaire part normalement, l'attente est simplement rendue visible et
+   peut être interrompue. Sans JavaScript, rien n'est affiché et le formulaire
+   fonctionne exactement comme avant. #}
+<div class="overlay" id="waiting" hidden>
+  <div class="card card-pad overlay-card" role="status" aria-live="polite">
+    <div class="overlay-spin" aria-hidden="true"></div>
+    <div class="overlay-title">Analyse en cours…</div>
+    <div class="hint" id="waiting-time">Temps écoulé : 0 s</div>
+    <div id="waiting-steps">
+      <div class="overlay-step">Étapes prévues :</div>
+    </div>
+    <div class="hint">
+      Le diagnostic DCMA-14 prend quelques secondes ; la simulation Monte Carlo est
+      l’étape la plus longue et dépend du nombre de simulations. Cette page se
+      remplacera automatiquement par le résultat.
+    </div>
+    <div class="hint" id="waiting-slow" hidden>
+      L’analyse dépasse la minute : un planning volumineux ou un grand nombre de
+      simulations peut demander plusieurs minutes.
+    </div>
+    <button class="btn btn-ghost" type="button" id="cancel-btn">Arrêter l’analyse</button>
+    <div class="hint" id="cancel-state" hidden>
+      Arrêt demandé : l’analyse va s’interrompre sans décompter votre quota.
+    </div>
+  </div>
+</div>
+
 {# Confort uniquement : nom du fichier choisi et glisser-déposer. Le formulaire
    reste entièrement fonctionnel sans JavaScript (l'input natif est superposé
    à la zone pointillée et ouvre le sélecteur au clic). #}
@@ -158,6 +187,71 @@
         input.files = ev.dataTransfer.files;
         show();
       }
+    });
+  })();
+</script>
+
+{# Page d'attente : temps écoulé et arrêt de l'analyse. Le formulaire part
+   normalement (aucune requête parallèle n'est nécessaire pour l'analyse
+   elle-même) ; le bouton d'arrêt signale seulement l'annulation au serveur.
+   Sans JavaScript, rien de tout ceci n'est affiché. #}
+<script>
+  (function () {
+    var form = document.getElementById("analyse-form");
+    var waiting = document.getElementById("waiting");
+    var timeEl = document.getElementById("waiting-time");
+    var stepsEl = document.getElementById("waiting-steps");
+    var slowEl = document.getElementById("waiting-slow");
+    var cancelBtn = document.getElementById("cancel-btn");
+    var cancelState = document.getElementById("cancel-state");
+    var tokenInput = document.getElementById("client_token");
+    if (!form || !waiting) return;
+
+    var timer = null;
+    var started = 0;
+    var stopped = false;
+
+    function plannedSteps() {
+      var checked = form.querySelector('input[name="analysis"]:checked');
+      var mode = checked ? checked.value : "dcma";
+      var steps = [];
+      if (mode === "dcma" || mode === "both") steps.push("Diagnostic qualité DCMA-14");
+      if (mode === "montecarlo" || mode === "both") steps.push("Simulation Monte Carlo");
+      return steps;
+    }
+
+    form.addEventListener("submit", function () {
+      waiting.hidden = false;
+      started = Date.now();
+      plannedSteps().forEach(function (label) {
+        var line = document.createElement("div");
+        line.className = "overlay-step";
+        line.textContent = "• " + label;
+        stepsEl.appendChild(line);
+      });
+      timer = window.setInterval(function () {
+        var seconds = Math.round((Date.now() - started) / 1000);
+        timeEl.textContent = "Temps écoulé : " + seconds + " s";
+        if (seconds >= 60) slowEl.hidden = false;
+      }, 500);
+    });
+
+    cancelBtn.addEventListener("click", function () {
+      if (stopped || !tokenInput) return;
+      stopped = true;
+      cancelBtn.disabled = true;
+      cancelState.hidden = false;
+      fetch("/annuler/" + encodeURIComponent(tokenInput.value), {
+        method: "POST",
+        keepalive: true
+      }).then(function (response) {
+        if (response.status !== 204) {
+          cancelState.textContent = "Cette analyse est déjà terminée.";
+          cancelBtn.disabled = false;
+        }
+      }).catch(function () {
+        cancelState.textContent = "L’arrêt n’a pas pu être transmis : l’analyse se poursuit.";
+      });
     });
   })();
 </script>

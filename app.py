@@ -18,20 +18,24 @@ Aucune authentification n'est intégrée : voir la section « Sécurité » du
 README avant toute exposition sur Internet.
 """
 
+import base64
 import csv
 import io
 import os
 import re
+import secrets
+import signal
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import xlsxwriter
-from flask import Flask, Response, render_template, request
+from flask import Flask, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
@@ -55,10 +59,16 @@ DAILY_ANALYSIS_LIMIT = int(os.environ.get("DAILY_ANALYSIS_LIMIT", "5"))
 # partagée par tous les workers et threads via SQLite.
 MAX_CONCURRENT_ANALYSES = max(int(os.environ.get("MAX_CONCURRENT_ANALYSES", "2")), 1)
 
-# Formats de résultat proposés au dépôt du formulaire. « page » rend le HTML,
-# les autres renvoient directement un fichier : aucune donnée n'est conservée
-# côté serveur, l'analyse et l'export ont lieu dans la même requête.
-RESULT_FORMATS = ("page", "csv", "xlsx")
+# Exports facultatifs demandés au dépôt du formulaire, en plus de la page de
+# résultat qui est toujours rendue. Le fichier est produit dans la même requête
+# et transmis sous forme de lien de téléchargement autonome (data:), sans
+# aucune écriture côté serveur.
+EXPORT_FORMATS = {
+    "csv": ("Fichier CSV", "text/csv", "csv"),
+    "xlsx": ("Classeur Excel",
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+             "xlsx"),
+}
 
 # Chemin du compteur d'usage dans l'image. USAGE_DB_PATH n'est utile que pour
 # lancer l'application hors conteneur (tests locaux).
@@ -75,6 +85,10 @@ LOG4J_NOISE = re.compile(
 
 class AnalysisError(RuntimeError):
     pass
+
+
+class AnalysisCancelled(AnalysisError):
+    """Analyse interrompue à la demande du visiteur."""
 
 
 def usage_db_path():
@@ -105,8 +119,17 @@ def init_usage_db():
                 "CREATE TABLE IF NOT EXISTS running ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "ip TEXT NOT NULL, "
-                "started_at TEXT NOT NULL)"
+                "started_at TEXT NOT NULL, "
+                "token TEXT, "
+                "cancelled INTEGER NOT NULL DEFAULT 0)"
             )
+            # Bases créées par une version antérieure : ajout des colonnes
+            # nécessaires à l'annulation (sans effet si elles existent déjà).
+            for colonne, definition in (("token", "TEXT"), ("cancelled", "INTEGER NOT NULL DEFAULT 0")):
+                try:
+                    conn.execute(f"ALTER TABLE running ADD COLUMN {colonne} {definition}")
+                except sqlite3.OperationalError:
+                    pass
             conn.commit()
     except (sqlite3.Error, OSError):
         app.logger.exception(
@@ -172,7 +195,7 @@ def quota_exceeded_message():
     )
 
 
-def acquire_analysis_slot(ip):
+def acquire_analysis_slot(ip, token=None):
     """Réserve un créneau d'analyse lourde (MAX_CONCURRENT_ANALYSES au total).
 
     Retourne l'identifiant du créneau, 0 si le compteur est indisponible (on
@@ -181,6 +204,7 @@ def acquire_analysis_slot(ip):
 
     L'insertion conditionnelle est atomique : le comptage reste juste entre les
     workers Gunicorn et leurs threads, contrairement à un sémaphore en mémoire.
+    Le jeton permet au visiteur d'annuler son analyse depuis la page d'attente.
     """
     started = datetime.now(timezone.utc)
     stale_before = (started - timedelta(seconds=TIMEOUT_SECONDS + 120)).isoformat()
@@ -190,9 +214,9 @@ def acquire_analysis_slot(ip):
             # pas bloquer le service définitivement.
             conn.execute("DELETE FROM running WHERE started_at < ?", (stale_before,))
             cursor = conn.execute(
-                "INSERT INTO running (ip, started_at) "
-                "SELECT ?, ? WHERE (SELECT COUNT(*) FROM running) < ?",
-                (ip, started.isoformat(), MAX_CONCURRENT_ANALYSES),
+                "INSERT INTO running (ip, started_at, token) "
+                "SELECT ?, ?, ? WHERE (SELECT COUNT(*) FROM running) < ?",
+                (ip, started.isoformat(), token, MAX_CONCURRENT_ANALYSES),
             )
             conn.commit()
             return cursor.lastrowid if cursor.rowcount > 0 else None
@@ -211,6 +235,68 @@ def release_analysis_slot(slot_id):
             conn.commit()
     except (sqlite3.Error, OSError):
         app.logger.exception("Libération du créneau d'analyse impossible")
+
+
+def valid_token(token):
+    """Jeton d'annulation : 32 caractères hexadécimaux, non devinable."""
+    return bool(token) and re.fullmatch(r"[0-9a-f]{32}", token or "") is not None
+
+
+def cancel_requested(token):
+    """Vrai si le visiteur a demandé l'arrêt de cette analyse."""
+    if not valid_token(token):
+        return False
+    try:
+        with closing(usage_connect()) as conn:
+            row = conn.execute(
+                "SELECT cancelled FROM running WHERE token = ?", (token,)
+            ).fetchone()
+    except (sqlite3.Error, OSError):
+        app.logger.exception("Lecture de l'état d'annulation impossible")
+        return False
+    return bool(row and row[0])
+
+
+def request_cancellation(token, ip):
+    """Marque l'analyse comme à interrompre. Seule l'IP émettrice peut le faire.
+
+    Retourne True si une analyse correspondante était bien en cours.
+    """
+    if not valid_token(token):
+        return False
+    try:
+        with closing(usage_connect()) as conn:
+            cursor = conn.execute(
+                "UPDATE running SET cancelled = 1 WHERE token = ? AND ip = ?",
+                (token, ip),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except (sqlite3.Error, OSError):
+        app.logger.exception("Demande d'annulation impossible")
+        return False
+
+
+def stop_process(proc):
+    """Arrête le sous-processus et toute sa descendance (JVM comprise)."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except OSError:
+            return
+    try:
+        proc.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.kill()
+        try:
+            proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            app.logger.error("Sous-processus récalcitrant : %s", proc.pid)
 
 
 def busy_message():
@@ -1004,25 +1090,28 @@ def parse_montecarlo_options(form):
     return sims, opt, pess
 
 
-def run_script(cmd, label):
+def run_script(cmd, label, token=None):
+    """Exécute un script d'analyse et surveille le délai et l'annulation.
+
+    Le script est lancé dans son propre groupe de processus : l'arrêt demandé
+    par le visiteur, comme le dépassement du délai maximal, interrompt le script
+    et la JVM embarquée qu'il a démarrée. La sortie standard est filtrée du
+    warning Log4j avant d'être rendue à l'appelant.
+    """
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "UTF-8"
 
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        app.logger.error("Timeout pendant %s", label)
-        raise AnalysisError(
-            "L'analyse a dépassé le délai maximal. Réduisez le nombre de simulations ou vérifiez le fichier."
+            start_new_session=True,
         )
     except FileNotFoundError:
         app.logger.error("Script introuvable : %s", cmd[1] if len(cmd) > 1 else cmd)
@@ -1031,22 +1120,45 @@ def run_script(cmd, label):
         app.logger.exception("Erreur d'exécution pendant %s", label)
         raise AnalysisError("Une erreur est survenue pendant l'exécution de l'analyse.")
 
-    if completed.stderr.strip():
-        app.logger.warning("%s stderr : %s", label, completed.stderr)
+    deadline = time.monotonic() + TIMEOUT_SECONDS
+    commence = time.monotonic()
+    stdout = stderr = ""
 
-    if completed.returncode != 0:
+    # Boucle d'attente : on guette l'annulation toutes les demi-secondes plutôt
+    # que d'attendre la fin du script sans pouvoir l'interrompre.
+    while True:
+        try:
+            stdout, stderr = proc.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            if token and cancel_requested(token):
+                stop_process(proc)
+                app.logger.info(
+                    "%s interrompu à la demande du visiteur après %.1f s",
+                    label, time.monotonic() - commence,
+                )
+                raise AnalysisCancelled("Analyse interrompue à votre demande.")
+            if time.monotonic() > deadline:
+                stop_process(proc)
+                app.logger.error("Timeout pendant %s", label)
+                raise AnalysisError(
+                    "L'analyse a dépassé le délai maximal. Réduisez le nombre de "
+                    "simulations ou vérifiez le fichier."
+                )
+
+    if stderr.strip():
+        app.logger.warning("%s stderr : %s", label, stderr)
+
+    if proc.returncode != 0:
         app.logger.error(
             "%s a échoué avec le code %s\nstdout=%s\nstderr=%s",
-            label,
-            completed.returncode,
-            completed.stdout,
-            completed.stderr,
+            label, proc.returncode, stdout, stderr,
         )
         raise AnalysisError(
             f"L'exécution de {label} a échoué. Vérifiez que le fichier .mpp est valide et lisible."
         )
 
-    stdout = completed.stdout or ""
+    stdout = stdout or ""
     if not stdout.strip():
         app.logger.error("%s n'a produit aucune sortie standard", label)
         raise AnalysisError(f"Aucun résultat produit par {label}.")
@@ -1065,15 +1177,35 @@ def export_basename(filename):
     return f"MPPCR_{stem}_{date.today().isoformat()}"
 
 
-def export_response(payload, mimetype, filename):
-    return Response(
-        payload,
-        mimetype=mimetype,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Cache-Control": "no-store",
-        },
-    )
+def build_downloads(exports, results, filename):
+    """Liens de téléchargement autonomes pour les exports demandés.
+
+    Le fichier est encodé dans la page elle-même (« data: ») : aucun stockage
+    côté serveur, un seul aller-retour, et le téléchargement fonctionne sans
+    JavaScript ni requête supplémentaire.
+    """
+    if not exports:
+        return []
+
+    base = export_basename(filename)
+    downloads = []
+    for fmt in exports:
+        if fmt == "csv":
+            payload = csv_export_payload(results, filename)
+        elif fmt == "xlsx":
+            payload = xlsx_export_payload(results, filename)
+        else:
+            continue
+        libelle, mimetype, extension = EXPORT_FORMATS[fmt]
+        downloads.append(
+            {
+                "label": libelle,
+                "filename": f"{base}.{extension}",
+                "size": len(payload),
+                "href": f"data:{mimetype};base64,{base64.b64encode(payload).decode('ascii')}",
+            }
+        )
+    return downloads
 
 
 def parsed_by_kind(results, kind):
@@ -1449,6 +1581,7 @@ def index():
         "index.html",
         quota_remaining=quota_remaining(client_ip()),
         daily_limit=DAILY_ANALYSIS_LIMIT,
+        client_token=secrets.token_hex(16),
     )
 
 
@@ -1457,15 +1590,50 @@ def healthz():
     return "ok"
 
 
+@app.route("/annuler/<token>", methods=["POST", "GET"])
+def annuler(token):
+    """Demande l'arrêt de l'analyse en cours (bouton de la page d'attente).
+
+    Seule l'adresse IP qui a lancé l'analyse peut l'interrompre. Le POST est
+    utilisé par le bouton (réponse vide) ; le GET existe pour un lien direct.
+    """
+    if not valid_token(token):
+        return render_template("error.html", message="Demande d'annulation invalide."), 400
+
+    stopped = request_cancellation(token, client_ip())
+    if request.method == "POST":
+        return "", 204 if stopped else 404
+
+    if stopped:
+        return render_template(
+            "error.html",
+            title="Arrêt demandé",
+            variant="warn",
+            message="L'analyse en cours va s'interrompre dans quelques instants. "
+                    "Votre quota n'a pas été décompté pour cette tentative.",
+        )
+    return render_template(
+        "error.html",
+        title="Aucune analyse à interrompre",
+        variant="warn",
+        message="Cette analyse est terminée, déjà interrompue, ou n'existe plus.",
+    ), 404
+
+
 @app.route("/analyse", methods=["POST"])
 def analyse():
     analysis = (request.form.get("analysis") or "dcma").strip()
     if analysis not in {"dcma", "montecarlo", "both"}:
         return render_template("error.html", message="Type d'analyse inconnu."), 400
 
-    result_format = (request.form.get("format") or "page").strip()
-    if result_format not in RESULT_FORMATS:
-        return render_template("error.html", message="Format de résultat inconnu."), 400
+    # Exports facultatifs demandés en plus de la page (cases à cocher).
+    requested_exports = [fmt for fmt in request.form.getlist("export") if fmt in EXPORT_FORMATS]
+
+    # Jeton d'annulation : fourni par le formulaire, sinon régénéré (le bouton
+    # d'arrêt n'est alors pas proposé).
+    client_token = (request.form.get("client_token") or "").strip()
+    if not valid_token(client_token):
+        client_token = secrets.token_hex(16)
 
     ip = client_ip()
 
@@ -1498,7 +1666,7 @@ def analyse():
     # Créneau d'analyse : au plus MAX_CONCURRENT_ANALYSES analyses lourdes en
     # parallèle, tous workers et threads confondus. Une demande refusée ici ne
     # consomme pas de quota.
-    slot = acquire_analysis_slot(ip)
+    slot = acquire_analysis_slot(ip, client_token)
     if slot is None:
         return render_template(
             "error.html",
@@ -1543,6 +1711,7 @@ def analyse():
                 stdout = run_script(
                     [sys.executable, str(DCMA_SCRIPT), str(mpp_path)],
                     "le diagnostic DCMA-14",
+                    token=client_token,
                 )
                 quota_counted = count_analysis(ip, quota_counted)
                 results.append(
@@ -1569,7 +1738,7 @@ def analyse():
                 if estimates_path is not None:
                     cmd.extend(["--estimates", str(estimates_path)])
 
-                stdout = run_script(cmd, "la simulation Monte Carlo")
+                stdout = run_script(cmd, "la simulation Monte Carlo", token=client_token)
                 quota_counted = count_analysis(ip, quota_counted)
                 results.append(
                     {
@@ -1581,29 +1750,27 @@ def analyse():
 
             filename = secure_filename(mpp_file.filename) or "planning.mpp"
 
-            # Le format est choisi au dépôt du formulaire : l'export est produit
-            # dans la même requête, rien n'est conservé côté serveur.
-            if result_format == "csv":
-                return export_response(
-                    csv_export_payload(results, filename),
-                    "text/csv; charset=utf-8",
-                    export_basename(filename) + ".csv",
-                )
-
-            if result_format == "xlsx":
-                return export_response(
-                    xlsx_export_payload(results, filename),
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    export_basename(filename) + ".xlsx",
-                )
-
+            # La page de résultat est toujours rendue ; les exports demandés y
+            # sont ajoutés sous forme de liens autonomes (data:), produits dans
+            # la même requête : rien n'est écrit côté serveur.
             return render_template(
                 "result.html",
                 results=results,
                 filename=filename,
                 labels=DCMA_LABELS,
                 verdicts=VERDICT_LABELS,
+                downloads=build_downloads(requested_exports, results, filename),
             )
+
+    except AnalysisCancelled:
+        app.logger.info("Analyse annulée par le visiteur (IP %s)", ip)
+        return render_template(
+            "error.html",
+            title="Analyse interrompue",
+            variant="warn",
+            message="L'analyse a été interrompue à votre demande. Aucune analyse "
+                    "n'a été décomptée de votre quota du jour.",
+        )
 
     except AnalysisError as exc:
         return render_template("error.html", message=str(exc)), 400

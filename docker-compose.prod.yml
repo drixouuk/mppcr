@@ -1,7 +1,7 @@
 services:
   mppcr:
     # Pinner une version en production, jamais :latest.
-    image: ghcr.io/drixouuk/mppcr:v1.1.0
+    image: ghcr.io/drixouuk/mppcr:v1.2.0
     container_name: mppcr
     restart: unless-stopped
     ports:

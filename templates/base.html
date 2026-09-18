@@ -325,6 +325,25 @@
   .score details.adv{margin:16px 0 0}
   .score details.adv .hint + .hint{margin-top:10px}
 
+  /* ============ ATTENTE ET ARRÊT (propre au rendu serveur) ============ */
+  .choices.is-pair{grid-template-columns:repeat(2,1fr)}
+  .overlay{
+    position:fixed;inset:0;z-index:80;background:rgba(22,24,29,.45);
+    display:grid;place-items:center;padding:24px;
+  }
+  .overlay[hidden]{display:none}
+  .overlay-card{max-width:470px;width:100%;margin:0;text-align:center}
+  .overlay-spin{
+    width:34px;height:34px;margin:2px auto 14px;border-radius:50%;
+    border:3px solid var(--border);border-top-color:var(--brand);
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .overlay-title{font-size:15px;font-weight:700;margin-bottom:6px}
+  .overlay-step{font-size:13px;color:var(--text-2);margin-top:4px}
+  .overlay-card .btn{margin-top:16px}
+  .overlay-card .hint{text-align:left}
+
   /* ============ MONTE CARLO ============ */
   .facts{display:flex;gap:26px;flex-wrap:wrap;font-size:13px;color:var(--text-2)}
   .facts b{color:var(--text);font-variant-numeric:tabular-nums}
@@ -402,7 +421,7 @@
 
   /* ============ PRINT ============ */
   @media print{
-    .topbar,.btn,.drop,details.raw summary,.no-print{display:none!important}
+    .topbar,.btn,.drop,details.raw summary,.no-print,.overlay{display:none!important}
     body{background:#fff}
     .view{padding:0}
     .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid}
