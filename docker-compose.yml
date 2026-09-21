@@ -8,13 +8,14 @@ services:
     environment:
       ANALYSIS_TIMEOUT: 300  # un fichier pathologique est coupé au bout de 5 min
       DAILY_ANALYSIS_LIMIT: "5"
-      MAX_CONCURRENT_ANALYSES: 1  # une seule JVM lourde à la fois
+      MAX_CONCURRENT_ANALYSES: 2  # deux analyses de front, soit deux JVM de 1,5 Go
       MAX_UPLOAD_MB: "5"          # taille maximale du planning accepté
       # Mémoire allouée à chaque analyse (valeur de l'image, ajustable ici) :
-      # 2 Go couvrent un planning très détaillé (relevé le 21/09 : 768 Mo ne
-      # suffisaient pas pour un plan de 100 tâches) ; l'analyse échoue proprement
-      # au-delà plutôt que d'épuiser la mémoire du serveur.
-      JAVA_TOOL_OPTIONS: "-Xmx2g -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
+      # 1,5 Go couvrent largement un planning très détaillé (mesures du 21/09 :
+      # un million d'entrées d'avancement daté demande 792 Mo, un plan courant
+      # 115 Mo) ; l'analyse échoue proprement au-delà plutôt que d'épuiser la
+      # mémoire du serveur. Deux analyses simultanées tiennent dans 5 Go.
+      JAVA_TOOL_OPTIONS: "-Xmx1536m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
     # Garde-fous mémoire : le conteneur ne peut pas affamer les services voisins
     # de la machine, et c'est lui que le noyau tue en premier en cas de manque.
     mem_limit: 5g

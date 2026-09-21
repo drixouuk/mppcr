@@ -13,13 +13,14 @@ ENV PYTHONUNBUFFERED=1 \
 # un conteneur qui en partage 8 avec d'autres services — un planning volumineux
 # pouvait donc épuiser l'hôte et faire tuer des processus voisins par le noyau.
 # Bornée, la même analyse échoue proprement avec un message explicite.
-# 2 Go depuis le 21/09/2026 : les mesures montrent que ce qui pèse n'est ni la
-# taille du fichier ni le nombre de tâches, mais le volume de données datées
-# (avancement saisi période par période). Un plan de 100 tâches suivi finement
-# dépassait les 768 Mo précédents ; un million d'entrées datées demande ~790 Mo.
+# 1,5 Go depuis le 21/09/2026 : les mesures montrent que ce qui pèse n'est ni la
+# taille du fichier ni le nombre de tâches (24 000 tâches = 225 Mo, un .mpp réel
+# de 11,8 Mo = 118 Mo), mais le volume de données datées : un million d'entrées
+# d'avancement demande ~790 Mo, un plan courant ~115 Mo. 1,5 Go laisse donc une
+# marge confortable tout en permettant deux analyses simultanées dans 5 Go.
 # Ajustable au lancement sans reconstruire l'image :
 #   docker run -e JAVA_TOOL_OPTIONS="-Xmx3g ..." …
-ENV JAVA_TOOL_OPTIONS="-Xmx2g -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
+ENV JAVA_TOOL_OPTIONS="-Xmx1536m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
 
 # JRE headless requis par MPXJ / jpype1.
 RUN apt-get update \

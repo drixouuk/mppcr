@@ -341,7 +341,9 @@ def memory_shortage_message():
         "Le planning est trop volumineux pour la mémoire disponible"
         f"{allocation}. Réduisez le périmètre analysé (extrait du planning, "
         "suppression des tâches inutiles) ou demandez à l'administrateur "
-        f"d'augmenter MAX_UPLOAD_MB et la mémoire allouée à l'analyse."
+        f"d'augmenter MAX_UPLOAD_MB et la mémoire allouée à l'analyse. "
+        "Le fichier peut aussi être corrompu : dans ce cas, ouvrez-le dans "
+        "MS Project et recopiez son contenu dans un nouveau fichier .mpp."
     )
 
 

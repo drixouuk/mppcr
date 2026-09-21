@@ -79,9 +79,9 @@ location / {
 | --- | --- | --- |
 | `ANALYSIS_TIMEOUT` | `300` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
 | `DAILY_ANALYSIS_LIMIT` | `5` | Nombre d'analyses autorisées par adresse IP et par jour calendaire. |
-| `MAX_CONCURRENT_ANALYSES` | `1` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
+| `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
 | `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo. Au-delà, refus avec un message explicite. |
-| `JAVA_TOOL_OPTIONS` | `-Xmx2g …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
+| `JAVA_TOOL_OPTIONS` | `-Xmx1536m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
 les compteurs sont écrits par défaut dans `/app/data/usage.db`.
@@ -170,17 +170,23 @@ garde-fous ont été ajoutés :
 
 | Garde-fou | Effet |
 | --- | --- |
-| `JAVA_TOOL_OPTIONS=-Xmx2g …` (image) | borne le tas de chaque analyse : de 7,8 Go à 2 Go |
+| `JAVA_TOOL_OPTIONS=-Xmx1536m …` (image) | borne le tas de chaque analyse : de 7,8 Go à 1,5 Go |
 | `MAX_UPLOAD_MB` (défaut 5) | refuse les fichiers trop gros par un message explicite, avant lecture |
 | `mem_limit: 5g` + `oom_score_adj: 500` (compose) | le conteneur ne peut pas affamer ses voisins, et c'est lui que le noyau tue en premier |
 | `ANALYSIS_TIMEOUT=300` | un fichier pathologique est coupé au bout de 5 minutes, jamais la journée |
 
 Quand la mémoire allouée ne suffit pas, l'analyse s'arrête proprement et le
 visiteur reçoit un message dédié — « Le planning est trop volumineux pour la
-mémoire disponible (2 Go alloués à l'analyse). Réduisez le périmètre analysé… » —
-sans consommer d'analyse de son quota. Le **pic de mémoire** de chaque analyse est
-écrit dans les journaux, ce qui permet de calibrer les limites sur des fichiers
-réels plutôt qu'à l'aveugle.
+mémoire disponible (1536 Mo alloués à l'analyse). Réduisez le périmètre analysé… Le
+fichier peut aussi être corrompu : dans ce cas, ouvrez-le dans MS Project et
+recopiez son contenu dans un nouveau fichier .mpp. » — sans consommer d'analyse de
+son quota. Le **pic de mémoire** de chaque analyse est écrit dans les journaux, ce
+qui permet de calibrer les limites sur des fichiers réels plutôt qu'à l'aveugle.
+
+Cette dernière phrase n'est pas théorique : un planning corrompu **s'ouvre
+normalement dans MS Project** tout en étant illisible pour la bibliothèque de
+lecture, qui épuise alors n'importe quelle mémoire disponible. Le seul remède
+connu est de recopier le contenu du planning dans un fichier neuf.
 
 **Pour accepter de plus gros plannings**, si la machine en a les moyens :
 
