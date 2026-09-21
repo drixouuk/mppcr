@@ -148,7 +148,7 @@ jobs:
           echo "--- garde-fous mémoire de l'image ---"
           heap=$(docker exec mppcr-smoke java -XX:+PrintFlagsFinal -version 2>/dev/null \
             | grep -oE '^ *size_t MaxHeapSize *= *[0-9]+' | grep -oE '[0-9]+$')
-          [ -n "$heap" ] && [ "$heap" -lt 2147483648 ] \
+          [ -n "$heap" ] && [ "$heap" -le 2147483648 ] \
             || { echo "tas JVM non borné : ${heap:-inconnu}"; exit 1; }
           echo "tas JVM maximal : $((heap / 1024 / 1024)) Mo"
 

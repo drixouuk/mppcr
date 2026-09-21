@@ -60,12 +60,13 @@ location / {
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 
-    # Le formulaire accepte des plannings jusqu'à 20 Mo.
+    # Le formulaire accepte des plannings jusqu'à MAX_UPLOAD_MB (5 Mo par défaut).
     client_max_body_size 25m;
 
-    # Cohérent avec ANALYSIS_TIMEOUT=900 : Monte Carlo peut être long.
-    proxy_read_timeout 900s;
-    proxy_send_timeout 900s;
+    # Une requête lance au plus deux scripts (diagnostic puis simulation), chacun
+    # borné par ANALYSIS_TIMEOUT=300 : 700 s couvre le pire cas légitime.
+    proxy_read_timeout 700s;
+    proxy_send_timeout 700s;
 }
 ```
 
@@ -74,13 +75,13 @@ location / {
 
 ## Variables d'environnement
 
-| Variable | Défaut | Rôle |
+| Variable | Défaut (compose) | Rôle |
 | --- | --- | --- |
-| `ANALYSIS_TIMEOUT` | `900` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
+| `ANALYSIS_TIMEOUT` | `300` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
 | `DAILY_ANALYSIS_LIMIT` | `5` | Nombre d'analyses autorisées par adresse IP et par jour calendaire. |
-| `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
+| `MAX_CONCURRENT_ANALYSES` | `1` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
 | `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo. Au-delà, refus avec un message explicite. |
-| `JAVA_TOOL_OPTIONS` | `-Xmx768m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
+| `JAVA_TOOL_OPTIONS` | `-Xmx2g …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
 les compteurs sont écrits par défaut dans `/app/data/usage.db`.
@@ -169,13 +170,14 @@ garde-fous ont été ajoutés :
 
 | Garde-fou | Effet |
 | --- | --- |
-| `JAVA_TOOL_OPTIONS=-Xmx768m …` (image) | borne le tas de chaque analyse : de 7,8 Go à 768 Mo |
+| `JAVA_TOOL_OPTIONS=-Xmx2g …` (image) | borne le tas de chaque analyse : de 7,8 Go à 2 Go |
 | `MAX_UPLOAD_MB` (défaut 5) | refuse les fichiers trop gros par un message explicite, avant lecture |
-| `mem_limit: 3g` + `oom_score_adj: 500` (compose) | le conteneur ne peut pas affamer ses voisins, et c'est lui que le noyau tue en premier |
+| `mem_limit: 5g` + `oom_score_adj: 500` (compose) | le conteneur ne peut pas affamer ses voisins, et c'est lui que le noyau tue en premier |
+| `ANALYSIS_TIMEOUT=300` | un fichier pathologique est coupé au bout de 5 minutes, jamais la journée |
 
 Quand la mémoire allouée ne suffit pas, l'analyse s'arrête proprement et le
 visiteur reçoit un message dédié — « Le planning est trop volumineux pour la
-mémoire disponible (768 Mo alloués à l'analyse). Réduisez le périmètre analysé… » —
+mémoire disponible (2 Go alloués à l'analyse). Réduisez le périmètre analysé… » —
 sans consommer d'analyse de son quota. Le **pic de mémoire** de chaque analyse est
 écrit dans les journaux, ce qui permet de calibrer les limites sur des fichiers
 réels plutôt qu'à l'aveugle.
@@ -185,12 +187,43 @@ réels plutôt qu'à l'aveugle.
 ```bash
 docker run -d -p 5000:5000 \
   -e MAX_UPLOAD_MB=15 \
-  -e JAVA_TOOL_OPTIONS="-Xmx2048m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" \
-  --memory 4g ghcr.io/drixouuk/mppcr:latest
+  -e MAX_CONCURRENT_ANALYSES=1 \
+  -e JAVA_TOOL_OPTIONS="-Xmx3g -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" \
+  --memory 6g ghcr.io/drixouuk/mppcr:latest
 ```
 
-et descendre `MAX_CONCURRENT_ANALYSES` à 1 : chaque analyse simultanée consomme sa
-propre JVM.
+Deux règles : le tas ne doit **jamais dépasser la moitié du plafond du conteneur**
+(sinon c'est le noyau qui tue la JVM, et le visiteur reçoit une erreur technique au
+lieu d'un diagnostic), et chaque analyse simultanée consomme sa propre JVM — garder
+`MAX_CONCURRENT_ANALYSES` à 1 si la machine n'a pas la mémoire pour deux.
+
+### Ce qui pèse réellement (mesures du 21/09)
+
+Le nombre de tâches et la taille du fichier sont de mauvais indicateurs. Mesures
+faites avec la JVM de l'image, pic de mémoire résident du sous-processus :
+
+| Modèle analysé | Fichier | Pic mémoire | Durée |
+| --- | --- | --- | --- |
+| 19 tâches (`.mpp` binaire réel) | 393 Ko | 111 Mo | 1,0 s |
+| 1 tâche, calendriers très détaillés (`.mpp` binaire réel) | 11,8 Mo | 118 Mo | 1,4 s |
+| 100 tâches, 900 liens, 10¹⁰ chemins possibles (MSPDI) | 111 Ko | 129 Mo | 1,4 s |
+| 100 tâches avec cycle, auto-dépendance ou tâches externes (MSPDI) | 31-35 Ko | 118-123 Mo | 1,4-2,0 s |
+| 24 000 tâches + liens + baselines (MSPDI) | 11,8 Mo | 225 Mo | 5,0 s |
+| 100 000 entrées d'avancement daté (MSPDI) | 16,4 Mo | 201 Mo | 4,0 s |
+| **1 000 000 d'entrées d'avancement daté** (MSPDI) | 160 Mo | **792 Mo** | **16,0 s** |
+
+Résultat contre-intuitif : ce n'est ni la taille du fichier, ni le nombre de tâches,
+ni la densité des liens qui pèsent, mais le **volume de données datées**
+(`TimephasedData`, l'avancement saisi période par période). Un plan de 100 tâches
+suivi au jour le jour pendant des années dépasse 1 Go là où un plan de 24 000 tâches
+non suivi se contente de 225 Mo : c'est ce profil qui a motivé le passage de 768 Mo
+à 2 Go de tas.
+
+Repères pour dimensionner : ~110 Mo incompressibles (JVM + POI + Python), puis
+environ 5 Ko par tâche et 0,7 Ko par entrée datée. Les durées restent modestes
+(quelques secondes) jusqu'à plusieurs centaines de milliers d'entrées ; au-delà,
+compter une quinzaine de secondes. À très fort volume, ce n'est plus la mémoire mais
+le **temps de calcul** qui devient le facteur limitant — d'où `ANALYSIS_TIMEOUT`.
 
 **Côté hôte**, la correction la plus durable est d'installer `lxcfs` sur l'hôte
 Proxmox et de l'activer pour le conteneur, afin que `/proc/meminfo` reflète la

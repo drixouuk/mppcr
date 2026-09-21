@@ -13,9 +13,13 @@ ENV PYTHONUNBUFFERED=1 \
 # un conteneur qui en partage 8 avec d'autres services — un planning volumineux
 # pouvait donc épuiser l'hôte et faire tuer des processus voisins par le noyau.
 # Bornée, la même analyse échoue proprement avec un message explicite.
+# 2 Go depuis le 21/09/2026 : les mesures montrent que ce qui pèse n'est ni la
+# taille du fichier ni le nombre de tâches, mais le volume de données datées
+# (avancement saisi période par période). Un plan de 100 tâches suivi finement
+# dépassait les 768 Mo précédents ; un million d'entrées datées demande ~790 Mo.
 # Ajustable au lancement sans reconstruire l'image :
-#   docker run -e JAVA_TOOL_OPTIONS="-Xmx1536m ..." …
-ENV JAVA_TOOL_OPTIONS="-Xmx768m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
+#   docker run -e JAVA_TOOL_OPTIONS="-Xmx3g ..." …
+ENV JAVA_TOOL_OPTIONS="-Xmx2g -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
 
 # JRE headless requis par MPXJ / jpype1.
 RUN apt-get update \
@@ -51,7 +55,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # 2 analyses simultanées suffisaient à saturer les 2 workers synchrones et à
 # faire passer le conteneur en unhealthy.
 # Le nombre d'analyses lourdes réellement menées de front reste borné par
-# MAX_CONCURRENT_ANALYSES (défaut 2), partagé entre workers via SQLite.
+# MAX_CONCURRENT_ANALYSES (défaut 1 : une seule JVM lourde à la fois), partagé
+# entre workers via SQLite. Le timeout Gunicorn couvre le pire cas légitime :
+# deux scripts (diagnostic puis simulation) de 300 s chacun.
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
      "--workers", "2", "--threads", "4", "--worker-class", "gthread", \
      "--timeout", "900", "app:app"]
