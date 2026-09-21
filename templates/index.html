@@ -14,16 +14,21 @@
     <input type="hidden" name="client_token" id="client_token" value="{{ client_token }}">
     <div class="field">
       <label class="flabel" for="mpp_file">Fichier planning</label>
-      <div class="drop" id="drop">
+      <div class="drop" id="drop" data-max-mb="{{ max_upload_mb|default(5) }}">
         <input type="file" id="mpp_file" name="mpp_file" accept=".mpp" required>
         <span class="ic">
           <svg fill="none" stroke-width="2" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
         </span>
         <div class="t1"><span class="link">Parcourir…</span> ou glisser-déposer</div>
-        <div class="t2">.mpp uniquement · 20 Mo max</div>
+        <div class="t2">.mpp uniquement · {{ max_upload_mb|default(5) }} Mo max</div>
         <div class="fname" id="fname"></div>
+        <div class="hint" id="taille-note" hidden></div>
       </div>
-      <div class="hint">Le planning est analysé dans un répertoire temporaire supprimé en fin de requête : aucun fichier n’est conservé.</div>
+      <div class="hint">
+        Le planning est analysé dans un répertoire temporaire supprimé en fin de requête :
+        aucun fichier n’est conservé. Les plannings les plus volumineux demandent beaucoup
+        de mémoire pour être lus et peuvent être refusés.
+      </div>
     </div>
 
     <fieldset class="field">
@@ -175,6 +180,20 @@
       }
     }
 
+    // Contrôle de taille côté navigateur : message immédiat. Le serveur refuse
+    // de toute façon le fichier, ceci évite seulement d'attendre l'envoi.
+    input.addEventListener("change", function () {
+      var limite = Number(drop.dataset.maxMb || 5) * 1024 * 1024;
+      var note = document.getElementById("taille-note");
+      if (input.files && input.files.length && note) {
+        var mo = (input.files[0].size / 1024 / 1024).toFixed(1);
+        note.textContent = input.files[0].size > limite
+          ? "Fichier de " + mo + " Mo : au-delà de la limite de "
+            + drop.dataset.maxMb + " Mo, l'envoi sera refusé."
+          : input.files[0].name + " (" + mo + " Mo)";
+        note.hidden = false;
+      }
+    });
     input.addEventListener("change", show);
     ["dragover", "dragenter"].forEach(function (e) {
       drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add("drag"); });

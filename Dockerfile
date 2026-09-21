@@ -6,6 +6,17 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     JAVA_HOME=/usr/lib/jvm/default-java
 
+# Mémoire allouée à la JVM embarquée (lecture des .mpp par MPXJ/POI).
+# Indispensable : sans limite, la JVM se dimensionne sur la RAM qu'elle *croit*
+# voir. Dans un conteneur LXC, /proc/meminfo montre la mémoire de l'hôte (32 Go
+# ici) et non celle allouée au conteneur : la JVM se donnait 7,8 Go de tas pour
+# un conteneur qui en partage 8 avec d'autres services — un planning volumineux
+# pouvait donc épuiser l'hôte et faire tuer des processus voisins par le noyau.
+# Bornée, la même analyse échoue proprement avec un message explicite.
+# Ajustable au lancement sans reconstruire l'image :
+#   docker run -e JAVA_TOOL_OPTIONS="-Xmx1536m ..." …
+ENV JAVA_TOOL_OPTIONS="-Xmx768m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError"
+
 # JRE headless requis par MPXJ / jpype1.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends default-jre-headless \

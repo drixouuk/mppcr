@@ -1,7 +1,7 @@
 services:
   mppcr:
     # Pinner une version en production, jamais :latest.
-    image: ghcr.io/drixouuk/mppcr:v1.3.0
+    image: ghcr.io/drixouuk/mppcr:v1.4.0
     container_name: mppcr
     restart: unless-stopped
     ports:
@@ -10,6 +10,15 @@ services:
       - ANALYSIS_TIMEOUT=900
       - DAILY_ANALYSIS_LIMIT=5   # analyses autorisées par IP et par jour
       - MAX_CONCURRENT_ANALYSES=2  # analyses lourdes menées de front, tous visiteurs confondus
+      - MAX_UPLOAD_MB=5            # taille maximale du planning accepté
+      # Mémoire allouée à la JVM d'analyse : à augmenter si vous acceptez de gros
+      # plannings et disposez de la mémoire (ex. "-Xmx1536m -XX:+UseSerialGC").
+      - JAVA_TOOL_OPTIONS=-Xmx768m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -XX:+ExitOnOutOfMemoryError
+    # Le conteneur est plafonné et sacrifiable : en cas de manque de mémoire,
+    # le noyau tue cette analyse plutôt qu'un service voisin de la machine.
+    mem_limit: 3g
+    memswap_limit: 3g
+    oom_score_adj: 500
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')"]
       interval: 30s

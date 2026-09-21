@@ -79,6 +79,8 @@ location / {
 | `ANALYSIS_TIMEOUT` | `900` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
 | `DAILY_ANALYSIS_LIMIT` | `5` | Nombre d'analyses autorisées par adresse IP et par jour calendaire. |
 | `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
+| `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo. Au-delà, refus avec un message explicite. |
+| `JAVA_TOOL_OPTIONS` | `-Xmx768m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
 les compteurs sont écrits par défaut dans `/app/data/usage.db`.
@@ -152,6 +154,48 @@ soumission du formulaire se comporte exactement comme avant.
   (jeton aléatoire de 32 caractères, lié à l'adresse IP qui a lancé l'analyse).
   Le script en cours est interrompu, JVM comprise, et **aucune analyse n'est
   décomptée** du quota.
+
+## Mémoire et plannings volumineux
+
+La lecture d'un `.mpp` se fait dans une JVM embarquée (MPXJ + POI) : c'est de loin
+le poste le plus gourmand, et il croît vite avec le nombre de tâches.
+
+**Le piège corrigé en v1.4.** Dans un conteneur LXC, `/proc/meminfo` peut afficher
+la mémoire de l'**hôte** (32 Go dans notre cas) au lieu de celle allouée au
+conteneur (8 Go, partagés avec d'autres services). La JVM se dimensionnait donc
+sur 32 Go et se donnait **7,8 Go de tas** : un planning volumineux pouvait épuiser
+la mémoire de la machine et faire tuer des processus voisins par le noyau. Trois
+garde-fous ont été ajoutés :
+
+| Garde-fou | Effet |
+| --- | --- |
+| `JAVA_TOOL_OPTIONS=-Xmx768m …` (image) | borne le tas de chaque analyse : de 7,8 Go à 768 Mo |
+| `MAX_UPLOAD_MB` (défaut 5) | refuse les fichiers trop gros par un message explicite, avant lecture |
+| `mem_limit: 3g` + `oom_score_adj: 500` (compose) | le conteneur ne peut pas affamer ses voisins, et c'est lui que le noyau tue en premier |
+
+Quand la mémoire allouée ne suffit pas, l'analyse s'arrête proprement et le
+visiteur reçoit un message dédié — « Le planning est trop volumineux pour la
+mémoire disponible (768 Mo alloués à l'analyse). Réduisez le périmètre analysé… » —
+sans consommer d'analyse de son quota. Le **pic de mémoire** de chaque analyse est
+écrit dans les journaux, ce qui permet de calibrer les limites sur des fichiers
+réels plutôt qu'à l'aveugle.
+
+**Pour accepter de plus gros plannings**, si la machine en a les moyens :
+
+```bash
+docker run -d -p 5000:5000 \
+  -e MAX_UPLOAD_MB=15 \
+  -e JAVA_TOOL_OPTIONS="-Xmx2048m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError" \
+  --memory 4g ghcr.io/drixouuk/mppcr:latest
+```
+
+et descendre `MAX_CONCURRENT_ANALYSES` à 1 : chaque analyse simultanée consomme sa
+propre JVM.
+
+**Côté hôte**, la correction la plus durable est d'installer `lxcfs` sur l'hôte
+Proxmox et de l'activer pour le conteneur, afin que `/proc/meminfo` reflète la
+mémoire réellement allouée : toute JVM (et tout outil qui se dimensionne sur
+`/proc`) cesse alors de surestimer la machine.
 
 ## Limitation d'usage et concurrence
 

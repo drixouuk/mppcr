@@ -21,6 +21,7 @@ README avant toute exposition sur Internet.
 import base64
 import csv
 import io
+import logging
 import os
 import re
 import secrets
@@ -44,7 +45,24 @@ DCMA_SCRIPT = BASE_DIR / "dcma14.py"
 MONTECARLO_SCRIPT = BASE_DIR / "montecarlo.py"
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+# Les analyses journalisent leur durée et leur pic mémoire : ces lignes sont
+# utiles pour dimensionner les limites, elles restent en niveau INFO.
+app.logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+
+# Taille maximale acceptée pour un planning. Chaque analyse démarre une JVM
+# dont la mémoire est bornée (JAVA_TOOL_OPTIONS, voir Dockerfile) : au-delà de
+# cette taille, le fichier est refusé avec un message explicite, plutôt que de
+# laisser l'analyse échouer faute de mémoire.
+MAX_UPLOAD_MB = max(int(os.environ.get("MAX_UPLOAD_MB", "5")), 1)
+
+# Garde-fou absolu de Flask, volontairement plus large que la limite ci-dessus :
+# si Flask interrompt la requête en pleine réception, la connexion est coupée et
+# le visiteur voit une erreur réseau au lieu d'un message. Le refus « propre »
+# est donc prononcé dans analyse(), la limite publique restant MAX_UPLOAD_MB.
+HARD_UPLOAD_MB = max(MAX_UPLOAD_MB * 4, 30)
+app.config["MAX_CONTENT_LENGTH"] = HARD_UPLOAD_MB * 1024 * 1024
+
 TIMEOUT_SECONDS = int(os.environ.get("ANALYSIS_TIMEOUT", "900"))
 
 # Un seul reverse proxy (NPMplus) est placé devant l'application : x_for=1 fait
@@ -188,6 +206,20 @@ def consume_quota(ip):
         return True
 
 
+def too_large_message(taille_octets=None):
+    taille = ""
+    if taille_octets:
+        taille = f" ({taille_octets / 1024 / 1024:.1f} Mo reçus)"
+    memoire = configured_heap_mb()
+    allocation = f" La mémoire allouée à l'analyse est de {memoire} Mo." if memoire else ""
+    return (
+        f"Le fichier dépasse la taille maximale autorisée{taille} : "
+        f"{MAX_UPLOAD_MB} Mo. Les plannings volumineux demandent beaucoup de "
+        f"mémoire pour être lus.{allocation} Exportez un extrait du planning "
+        "(moins de tâches, ou un périmètre réduit) puis relancez l'analyse."
+    )
+
+
 def quota_exceeded_message():
     return (
         f"Vous avez atteint la limite de {DAILY_ANALYSIS_LIMIT} analyses par jour "
@@ -275,6 +307,54 @@ def request_cancellation(token, ip):
     except (sqlite3.Error, OSError):
         app.logger.exception("Demande d'annulation impossible")
         return False
+
+
+def configured_heap_mb():
+    """Mémoire (Mo) allouée à la JVM d'analyse, déduite des options Java."""
+    for variable in ("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JAVA_OPTS"):
+        options = os.environ.get(variable) or ""
+        correspondance = re.search(r"-Xmx(\d+)([mMgG]?)", options)
+        if correspondance:
+            valeur = int(correspondance.group(1))
+            unite = correspondance.group(2).lower()
+            return valeur if unite in ("m", "") else valeur * 1024
+    return None
+
+
+# Signatures d'un manque de mémoire côté JVM ou côté processus.
+MEMORY_ERROR_MARKERS = (
+    "outofmemoryerror", "java heap space", "gc overhead limit exceeded",
+    "cannot allocate memory", "memoryerror", "unable to create new native thread",
+    "native memory allocation", "too small maximum heap",
+)
+
+
+def memory_shortage(stderr, stdout=""):
+    contenu = f"{stderr or ''}\n{stdout or ''}".lower()
+    return any(marqueur in contenu for marqueur in MEMORY_ERROR_MARKERS)
+
+
+def memory_shortage_message():
+    memoire = configured_heap_mb()
+    allocation = f" ({memoire} Mo alloués à l'analyse)" if memoire else ""
+    return (
+        "Le planning est trop volumineux pour la mémoire disponible"
+        f"{allocation}. Réduisez le périmètre analysé (extrait du planning, "
+        "suppression des tâches inutiles) ou demandez à l'administrateur "
+        f"d'augmenter MAX_UPLOAD_MB et la mémoire allouée à l'analyse."
+    )
+
+
+def peak_rss_mb(pid):
+    """Pic de mémoire résidente du sous-processus (VmHWM), en Mo."""
+    try:
+        with open(f"/proc/{pid}/status", encoding="ascii", errors="replace") as fichier:
+            for ligne in fichier:
+                if ligne.startswith("VmHWM:"):
+                    return int(ligne.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
 
 
 def stop_process(proc):
@@ -1154,14 +1234,17 @@ def run_script(cmd, label, token=None):
     deadline = time.monotonic() + TIMEOUT_SECONDS
     commence = time.monotonic()
     stdout = stderr = ""
+    pic_memoire = 0
 
     # Boucle d'attente : on guette l'annulation toutes les demi-secondes plutôt
-    # que d'attendre la fin du script sans pouvoir l'interrompre.
+    # que d'attendre la fin du script sans pouvoir l'interrompre, et on relève
+    # au passage le pic de mémoire du sous-processus (utile pour dimensionner).
     while True:
         try:
             stdout, stderr = proc.communicate(timeout=0.5)
             break
         except subprocess.TimeoutExpired:
+            pic_memoire = max(pic_memoire, peak_rss_mb(proc.pid))
             if token and cancel_requested(token):
                 stop_process(proc)
                 app.logger.info(
@@ -1177,13 +1260,29 @@ def run_script(cmd, label, token=None):
                     "simulations ou vérifiez le fichier."
                 )
 
-    if stderr.strip():
-        app.logger.warning("%s stderr : %s", label, stderr)
+    duree = time.monotonic() - commence
+    # La JVM annonce ses options sur stderr : bruit inutile dans les journaux.
+    bruit_java = re.compile(r"^Picked up (JAVA_TOOL_OPTIONS|_JAVA_OPTIONS):.*$", re.MULTILINE)
+    stderr_utile = bruit_java.sub("", stderr or "").strip()
+
+    if stderr_utile:
+        app.logger.warning("%s stderr : %s", label, stderr_utile[:2000])
+
+    app.logger.info(
+        "%s terminé en %.1f s (pic mémoire du sous-processus : %s Mo)",
+        label, duree, pic_memoire or "?",
+    )
 
     if proc.returncode != 0:
+        if memory_shortage(stderr_utile, stdout):
+            app.logger.error(
+                "%s : mémoire insuffisante (pic %s Mo, code %s) — %s",
+                label, pic_memoire or "?", proc.returncode, stderr_utile[:800],
+            )
+            raise AnalysisError(memory_shortage_message())
         app.logger.error(
             "%s a échoué avec le code %s\nstdout=%s\nstderr=%s",
-            label, proc.returncode, stdout, stderr,
+            label, proc.returncode, stdout, stderr_utile[:2000],
         )
         raise AnalysisError(
             f"L'exécution de {label} a échoué. Vérifiez que le fichier .mpp est valide et lisible."
@@ -1600,7 +1699,9 @@ def xlsx_export_payload(results, filename):
 def handle_413(_error):
     return render_template(
         "error.html",
-        message="Le fichier dépasse la taille maximale autorisée (20 Mo).",
+        title="Fichier trop volumineux",
+        variant="warn",
+        message=too_large_message(request.content_length),
     ), 413
 
 
@@ -1624,6 +1725,7 @@ def index():
         "index.html",
         quota_remaining=quota_remaining(client_ip()),
         daily_limit=DAILY_ANALYSIS_LIMIT,
+        max_upload_mb=MAX_UPLOAD_MB,
         client_token=secrets.token_hex(16),
     )
 
@@ -1689,6 +1791,16 @@ def analyse():
             variant="warn",
             message=quota_exceeded_message(),
         ), 429
+
+    # Refus avant même d'écrire le fichier sur disque : la taille annoncée par
+    # le navigateur suffit à savoir que l'analyse n'aura pas la mémoire requise.
+    if (request.content_length or 0) > MAX_UPLOAD_MB * 1024 * 1024:
+        return render_template(
+            "error.html",
+            title="Fichier trop volumineux",
+            variant="warn",
+            message=too_large_message(request.content_length),
+        ), 413
 
     mpp_file = request.files.get("mpp_file")
     if mpp_file is None or not mpp_file.filename:
