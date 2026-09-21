@@ -111,7 +111,8 @@ jobs:
 
           echo "--- attente de /healthz ---"
           for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:5000/healthz | grep -q '^ok$'; then
+            curl -fsS http://127.0.0.1:5000/healthz -o /tmp/healthz.txt 2>/dev/null || true
+            if [ "$(cat /tmp/healthz.txt 2>/dev/null)" = "ok" ]; then
               echo "/healthz OK après ${i} tentative(s)"
               break
             fi
@@ -122,15 +123,34 @@ jobs:
           done
 
           echo "--- formulaire ---"
-          page=$(curl -fsS http://127.0.0.1:5000/)
-          echo "$page" | grep -q 'MPPCR'
-          echo "$page" | grep -q 'analyses restantes'
-          echo "$page" | grep -q 'name="export"'
-          echo "$page" | grep -q 'name="analysis"'
-          echo "$page" | grep -q 'name="client_token"'
-          echo "$page" | grep -q 'Export des résultats (facultatif)'
-          echo "$page" | grep -q 'id="waiting" hidden'
-          echo "$page" | grep -q 'id="cancel-btn"'
+          curl -fsS http://127.0.0.1:5000/ -o /tmp/form.html
+          grep -q 'MPPCR' /tmp/form.html
+          grep -q 'analyses restantes' /tmp/form.html
+          grep -q 'name="analysis"' /tmp/form.html
+          grep -q 'name="export"' /tmp/form.html
+          grep -q 'Export des résultats (facultatif)' /tmp/form.html
+          grep -q 'name="client_token"' /tmp/form.html
+          grep -q 'id="waiting" hidden' /tmp/form.html
+          grep -q 'id="cancel-btn"' /tmp/form.html
+          grep -qE '\.mpp uniquement · [0-9]+ Mo max' /tmp/form.html
+
+          echo "--- garde-fous mémoire de la demande ---"
+          grep -q 'peuvent être refusés' /tmp/form.html
+          head -c 8000000 /dev/urandom > /tmp/trop-gros.mpp
+          code=$(curl -sS -o /tmp/trop-gros.html -w '%{http_code}' \
+            -F "analysis=dcma" -F "mpp_file=@/tmp/trop-gros.mpp" \
+            http://127.0.0.1:5000/analyse)
+          [ "$code" = "413" ] || { echo "fichier trop gros -> $code au lieu de 413"; exit 1; }
+          grep -q 'Fichier trop volumineux' /tmp/trop-gros.html
+          grep -q 'Mo reçus' /tmp/trop-gros.html
+          grep -q 'extrait du planning' /tmp/trop-gros.html
+
+          echo "--- garde-fous mémoire de l'image ---"
+          heap=$(docker exec mppcr-smoke java -XX:+PrintFlagsFinal -version 2>/dev/null \
+            | grep -oE '^ *size_t MaxHeapSize *= *[0-9]+' | grep -oE '[0-9]+$')
+          [ -n "$heap" ] && [ "$heap" -lt 2147483648 ] \
+            || { echo "tas JVM non borné : ${heap:-inconnu}"; exit 1; }
+          echo "tas JVM maximal : $((heap / 1024 / 1024)) Mo"
 
           echo "--- compteur d'usage et verrou (droits d'écriture sur /app/data) ---"
           docker exec mppcr-smoke test -f /app/data/usage.db
@@ -144,9 +164,10 @@ jobs:
           grep -q 'Score de conformité DCMA' /tmp/result.html
           grep -q 'Comment ce score est calculé' /tmp/result.html
           grep -q 'Lecture décisionnelle' /tmp/result.html
-          tr -d '\n' < /tmp/result.html | grep -qE 'class="score-value">[[:space:]]*[0-9]+<'
+          tr -d '\n' < /tmp/result.html > /tmp/result-ligne.html
+          grep -qE 'class="score-value">[[:space:]]*[0-9]+<' /tmp/result-ligne.html
           grep -q 'Tâches concernées (N°)' /tmp/result.html
-          tr -d '\n' < /tmp/result.html | grep -qE 'class="ids">[[:space:]]*[0-9]'
+          grep -qE 'class="ids">[[:space:]]*[0-9]' /tmp/result-ligne.html
           if grep -q 'Log4j' /tmp/result.html; then
             echo "trace Log4j dans la page"; exit 1
           fi
