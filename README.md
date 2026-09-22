@@ -173,6 +173,16 @@ contrôle change de comportement de façon délibérée, comme le contrôle 1 en
 v1.6.0). Les contrôles sans écart affichent un tiret, et le contrôle 12
 (vérification manuelle) n'a pas de liste.
 
+Le même bloc porte, depuis la v1.8.0, des **compteurs de diagnostic** pour le
+contrôle 1 : une ligne par tâche signalée, sans aucun nom de tâche —
+`DIAG|1|<n°>|preds=<n>|succs=<n>|pct=<n>|jalon=<0/1>|externe=<0/1>|active=<0/1>|sous_projet=<0/1>`
+— et une ligne de synthèse `DIAG|TOTAL|taches=…|restantes=…|liens=…|externes=…`.
+L'interface web ne lit que les lignes `N|…` et ignore ce bloc, mais elle le
+**journalise**. Il distingue un planning où les liens manquent réellement d'un
+planning dont la **lecture** des liens échoue (tâches externes, inactives ou
+sous-projets) — sans avoir à transmettre le planning : ce sont les compteurs, vus
+par la bibliothèque de lecture, qui parlent.
+
 ## Exports
 
 Le résultat est **toujours affiché dans le navigateur**. Les exports sont

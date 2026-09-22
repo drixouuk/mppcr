@@ -51,6 +51,11 @@ HARD_CONSTRAINTS = {
 # l'option --details, le script produit exactement la meme sortie qu'avant.
 COLLECT_DETAILS = False
 TASK_DETAILS = {}
+# Compteurs techniques du controle 1 (option --details uniquement) : ils servent a
+# distinguer un planning ou les liens manquent vraiment d'un planning dont la
+# lecture des liens echoue (taches externes, inactives, sous-projets). Aucun nom
+# de tache n'y figure : uniquement des nombres.
+TASK_DIAG = {}
 
 
 def task_id(t):
@@ -76,6 +81,57 @@ def record_detail(numero, tasks):
     TASK_DETAILS[numero] = identifiants
 
 
+def diagnostic_tache(t):
+    """Compteurs techniques d'une tache, pour le diagnostic du controle 1.
+
+    Rend un dictionnaire de nombres seulement : nombre de predecesseurs et de
+    successeurs tels que le LECTEUR les restitue, avancement, jalon, tache
+    externe, tache active, tache representant un sous-projet.
+    """
+    def nombre(accesseur):
+        try:
+            valeur = getattr(t, accesseur)()
+        except Exception:
+            return -1
+        if valeur is None:
+            return -1
+        try:
+            return int(valeur)
+        except (TypeError, ValueError):
+            return 1 if valeur else 0
+
+    def compte(accesseur):
+        try:
+            valeur = getattr(t, accesseur)()
+        except Exception:
+            return -1
+        if valeur is None:
+            return 0
+        try:
+            return len(list(valeur))
+        except TypeError:
+            return -1
+
+    def renseigne(accesseur):
+        """1 si l'accesseur rend une valeur exploitable, 0 sinon."""
+        try:
+            valeur = getattr(t, accesseur)()
+        except Exception:
+            return 0
+        return 1 if valeur else 0
+
+    return {
+        "id": task_id(t) if task_id(t) is not None else -1,
+        "preds": compte("getPredecessors"),
+        "succs": compte("getSuccessors"),
+        "pct": nombre("getPercentageComplete"),
+        "jalon": nombre("getMilestone"),
+        "externe": renseigne("getExternalTask"),
+        "active": nombre("getActive"),
+        "sous_projet": renseigne("getSubprojectFile"),
+    }
+
+
 def print_details():
     """Bloc « N|id,id » lu par l'interface web, un controle par ligne."""
     print("=" * 72)
@@ -85,6 +141,23 @@ def print_details():
         identifiants = TASK_DETAILS[numero]
         print(f"{numero}|{','.join(str(i) for i in identifiants) if identifiants else '-'}")
     print()
+
+    # Diagnostic du controle 1 (Logic) : pourquoi ces taches sont-elles sans lien ?
+    # L'interface web ne lit que les lignes « N|… » ci-dessus et ignore ce bloc.
+    lignes = TASK_DIAG.get(1) or []
+    total = TASK_DIAG.get("TOTAL")
+    if lignes or total:
+        print("=" * 72)
+        print("DIAG_LECTURE (compteurs techniques du controle 1, aucun nom de tache)")
+        print("=" * 72)
+        if total:
+            print(f"DIAG|TOTAL|taches={total['taches']}|restantes={total['restantes']}"
+                  f"|liens={total['liens']}|externes={total['externes']}")
+        for tache in lignes:
+            print(f"DIAG|1|{tache['id']}|preds={tache['preds']}|succs={tache['succs']}"
+                  f"|pct={tache['pct']}|jalon={tache['jalon']}|externe={tache['externe']}"
+                  f"|active={tache['active']}|sous_projet={tache['sous_projet']}")
+        print()
 
 
 def is_real_task(t):
@@ -159,6 +232,10 @@ def check_logic(tasks):
             bad_tasks.add(t.getUniqueID())
 
     record_detail(1, [t for t in real if t.getUniqueID() in bad_tasks])
+    if COLLECT_DETAILS:
+        # Compteurs techniques : permettent de savoir si le lecteur restitue bien
+        # les liens de ces taches (voir print_details).
+        TASK_DIAG[1] = [diagnostic_tache(t) for t in real if t.getUniqueID() in bad_tasks]
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
@@ -377,6 +454,27 @@ def run_diagnostic(path):
 
     if COLLECT_DETAILS:
         TASK_DETAILS.clear()
+        TASK_DIAG.clear()
+        # Vue d'ensemble : le lecteur voit-il des liens dans ce planning ?
+        liens = 0
+        externes = 0
+        for t in tasks:
+            try:
+                preds = t.getPredecessors()
+                liens += len(list(preds)) if preds is not None else 0
+            except Exception:
+                pass
+            try:
+                if t.getExternalTask():
+                    externes += 1
+            except Exception:
+                pass
+        TASK_DIAG["TOTAL"] = {
+            "taches": len(tasks),
+            "restantes": len([t for t in tasks if is_remaining(t)]),
+            "liens": liens,
+            "externes": externes,
+        }
 
     print("=" * 72)
     print(f"DIAGNOSTIC DCMA-14 — {path}")

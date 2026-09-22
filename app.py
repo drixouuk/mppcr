@@ -1872,6 +1872,14 @@ def analyse():
                     "le diagnostic DCMA-14",
                     token=client_token,
                 )
+                # Lignes de diagnostic technique produites par dcma14.py : elles ne
+                # contiennent que des nombres (numéros de tâche et compteurs de
+                # liens), et servent à distinguer un planning sans liens d'un
+                # planning dont la lecture des liens échoue. Journalisées pour
+                # pouvoir être relues sans exposer le contenu du planning.
+                for ligne in stdout.splitlines():
+                    if ligne.startswith("DIAG|"):
+                        app.logger.info("diagnostic de lecture : %s", ligne.strip()[:400])
                 quota_counted = count_analysis(ip, quota_counted)
                 results.append(
                     {
