@@ -459,5 +459,9 @@
   {% block content %}{% endblock %}
 </main>
 
+<footer class="wrap">
+  {% if app_version %}<p class="meta">MPPCR — version {{ app_version }}</p>{% endif %}
+</footer>
+
 </body>
 </html>

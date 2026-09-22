@@ -36,6 +36,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY dcma14.py montecarlo.py app.py ./
 COPY templates ./templates
 
+# Version publiée : affichée en pied de page et dans les exports, pour savoir
+# sans ambiguïté quelle version tourne. La CI vérifie qu'elle correspond à
+# l'étiquette poussée.
+COPY VERSION ./
+
 # /app/data accueille usage.db (compteur d'analyses par IP). Sans ce chown, le
 # conteneur tourne en appuser et ne peut pas créer le fichier SQLite.
 RUN useradd --create-home appuser \

@@ -185,6 +185,22 @@ Deux garde-fous : sans aucun lien exploitable, la simulation s'arrête avec un
 message explicite plutôt que de traiter chaque tâche comme indépendante ; et un
 réseau contenant une boucle de dépendances est refusé.
 
+**Fiabilité affichée.** Quand le diagnostic DCMA-14 accompagne la simulation dans
+la même analyse, l'avertissement de fiabilité reprend la **valeur réelle du
+contrôle 1** — « 33,7 % des tâches restantes (26/77) n'ont pas de logique amont ou
+aval, au-dessus des 5 % attendus » — et aucun avertissement n'apparaît si ce
+contrôle est conforme. Lorsque le Monte Carlo est lancé seul, il ne se prononce pas
+sur la logique : il renvoie vers le diagnostic.
+
+C'est une correction de cohérence : la version précédente comparait un « ratio de
+liens par tâche » (calculé sur **toutes** les tâches de détail, achevées comprises,
+et sur des **relations**) au seuil de 5 % du contrôle 1 (calculé sur les seules
+tâches **restantes**, en nombre de tâches). Un planning à 88 % de liens par tâche
+peut parfaitement afficher 34 % de tâches restantes sans logique : les deux
+mesures sont justes, mais elles ne comparent pas la même chose. Le ratio reste
+affiché comme information de forme du réseau, sous l'étiquette « liens par tâche,
+tous statuts confondus ».
+
 ### Évolutions envisagées (non implémentées)
 
 1. **Tableau par macro-tâche de niveau 1** (les « programmes ») : reste-à-faire
@@ -455,13 +471,30 @@ Le workflow se déclenche sur push vers `main` et sur les tags `v*` :
 
 1. `test` — build natif sur `linux/amd64` (`ubuntu-24.04`) et `linux/arm64`
    (`ubuntu-24.04-arm`), puis smoke test : `/healthz`, page d'accueil, présence
-   de `/app/data/usage.db`, statut `healthy` du `HEALTHCHECK`.
+   de `/app/data/usage.db`, version exposée par l'image et affichée sur la page,
+   statut `healthy` du `HEALTHCHECK`. Sur un tag, le job vérifie d'abord que le
+   fichier **`VERSION`** correspond bien à l'étiquette poussée : une version
+   oubliée fait échouer la publication au lieu de produire une image menteuse.
 2. `publish` — build et push par architecture (par digest), avec cache GitHub
    Actions.
 3. `merge` — assemblage du manifeste multi-arch et application des tags :
    `latest` (push sur `main`), `vX.Y.Z`, `vX.Y`, `vX` (tags semver),
    `sha-xxxxxxx` (systématique).
 4. `release` — création automatique d'une GitHub Release sur tag `v*`.
+
+### Quelle version tourne ?
+
+Le fichier **`VERSION`** (racine du dépôt) est embarqué dans l'image et fait foi.
+La version est :
+
+- **affichée en pied de page** de l'application, sur toutes les pages ;
+- écrite dans les **exports CSV**, à côté de la date ;
+- **journalisée au démarrage** (`MPPCR vX.Y.Z — démarrage`), donc lisible par
+  `docker logs` ;
+- lisible dans l'image : `docker exec mpp cat /app/VERSION`.
+
+Pour publier une version : mettre `VERSION` à jour dans le commit, puis pousser
+l'étiquette correspondante — un décalage entre les deux est refusé par la CI.
 
 Les runners ARM64 natifs sont gratuits pour les dépôts publics. Si le dépôt
 devient privé sans runners ARM, remplacer `ubuntu-24.04-arm` par `ubuntu-24.04`

@@ -44,11 +44,35 @@ BASE_DIR = Path(__file__).resolve().parent
 DCMA_SCRIPT = BASE_DIR / "dcma14.py"
 MONTECARLO_SCRIPT = BASE_DIR / "montecarlo.py"
 
+
+def lire_version():
+    """Version publiée, lue dans le fichier VERSION embarqué dans l'image.
+
+    Elle est affichée en pied de page et dans les exports : on sait ainsi d'un
+    coup d'œil quelle version tourne, sans avoir à interroger le conteneur.
+    """
+    try:
+        return (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip() or "inconnue"
+    except OSError:
+        return "inconnue"
+
+
+APP_VERSION = lire_version()
+
+# Seuil DCMA-14 du contrôle 1 (Logic) : au-delà, le réseau n'est pas assez fiable
+# pour que la simulation Monte Carlo soit prise au sérieux.
+LOGIC_TARGET_PCT = 5.0
+
 app = Flask(__name__)
 
-# Les analyses journalisent leur durée et leur pic mémoire : ces lignes sont
-# utiles pour dimensionner les limites, elles restent en niveau INFO.
+
+@app.context_processor
+def injecter_version():
+    return {"app_version": APP_VERSION}
+
+
 app.logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+app.logger.info("MPPCR %s — démarrage", APP_VERSION)
 
 # Taille maximale acceptée pour un planning. Chaque analyse démarre une JVM
 # dont la mémoire est bornée (JAVA_TOOL_OPTIONS, voir Dockerfile) : au-delà de
@@ -1058,16 +1082,60 @@ def enrich_montecarlo(parsed):
     links = first_int(parsed["info"].get("links"))
     if tasks and links is not None:
         ratio = (links / tasks * 100.0) if tasks else 0.0
+        # Information de forme du réseau, tous statuts confondus : ce n'est PAS
+        # une mesure de la logique (voir croiser_logique_montecarlo).
         parsed["network"] = {
             "tasks": tasks,
             "links": links,
             "ratio_pct": round(ratio, 1),
         }
-        if ratio < 90:
-            parsed["network_warning"] = (
-                f"Réseau peu maillé : {links} liens pour {tasks} tâches ({ratio:.1f} %). "
-                "Le Monte Carlo reste indicatif tant que le contrôle Logic DCMA n'est pas revenu sous 5 %."
-            )
+
+
+def croiser_logique_montecarlo(montecarlo, dcma):
+    """Rend l'avertissement du Monte Carlo cohérent avec le contrôle 1 du DCMA-14.
+
+    Les deux indicateurs ne mesurent pas la même chose : le ratio « liens par
+    tâche » du Monte Carlo porte sur TOUTES les tâches de détail (achevées
+    comprises) et compte des relations, tandis que le contrôle 1 porte sur les
+    seules tâches restantes et compte des tâches. Un ratio de 88 % de liens par
+    tâche peut donc parfaitement cohabiter avec 34 % de tâches restantes sans
+    logique — les comparer n'aurait pas de sens, et l'ancien message invitait
+    pourtant à le faire.
+
+    L'avertissement s'appuie donc sur la valeur RÉELLE du contrôle 1 quand le
+    diagnostic est dans la même analyse, et reste silencieux sinon : on renvoie
+    alors vers le diagnostic plutôt que de juger la logique sur un ratio.
+    """
+    if not montecarlo or montecarlo.get("stop_message"):
+        return
+
+    ligne = None
+    for row in (dcma or {}).get("rows", []):
+        if row.get("num") == 1:
+            ligne = row
+            break
+
+    if ligne is None:
+        montecarlo["network_note"] = (
+            "Logique non évaluée dans cette analyse : la fiabilité de la simulation "
+            "en dépend. Lancez aussi le diagnostic DCMA-14 pour connaître la part des "
+            "tâches restantes sans logique (contrôle 1)."
+        )
+        return
+
+    valeur = ligne.get("value_num")
+    if valeur is None:
+        return
+    if valeur > LOGIC_TARGET_PCT:
+        detail = ligne.get("detail") or ""
+        complements = f" ({detail})" if detail else ""
+        montecarlo["network_title"] = "Logique insuffisante pour une simulation fiable"
+        montecarlo["network_warning"] = (
+            f"{valeur:.1f} % des tâches restantes{complements} n'ont pas de logique "
+            "amont ou aval, au-dessus des 5 % attendus (contrôle 1 DCMA-14). "
+            "Fiabiliser d'abord le réseau : la durée critique simulée ici n'est pas "
+            "encore fiable."
+        )
 
 
 def parse_montecarlo_output(text):
@@ -1425,6 +1493,7 @@ def csv_export_payload(results, filename):
     writer.writerow(["MPPCR — MS Project Check & Risk"])
     writer.writerow(["Fichier analysé", filename])
     writer.writerow(["Date de l'export", date.today().isoformat()])
+    writer.writerow(["Version MPPCR", APP_VERSION])
     writer.writerow(["Barème du score de conformité", SCORE_VERSION])
 
     dcma = parsed_by_kind(results, "dcma")
@@ -1476,7 +1545,8 @@ def csv_export_payload(results, filename):
         writer.writerow(["Liens de dépendance", info.get("links", "")])
         writer.writerow(["Simulations", info.get("sims", "")])
         if montecarlo.get("network"):
-            writer.writerow(["Densité de liens (%)", montecarlo["network"].get("ratio_pct", "")])
+            writer.writerow(["Liens par tâche, tous statuts (%)",
+                             montecarlo["network"].get("ratio_pct", "")])
         writer.writerow([])
         writer.writerow(["Indicateur", "Durée (j)", "Écart vs CPM (j)", "Cible / usage", "Commentaire"])
         writer.writerows(mc_export_rows(montecarlo))
@@ -1916,6 +1986,12 @@ def analyse():
                 )
 
             filename = secure_filename(mpp_file.filename) or "planning.mpp"
+
+            # L'avertissement de fiabilité du Monte Carlo se lit sur le contrôle 1
+            # réel du diagnostic, quand les deux analyses sont dans la même page.
+            croiser_logique_montecarlo(
+                parsed_by_kind(results, "montecarlo"), parsed_by_kind(results, "dcma")
+            )
 
             # La page de résultat est toujours rendue ; les exports demandés y
             # sont ajoutés sous forme de liens autonomes (data:), produits dans
