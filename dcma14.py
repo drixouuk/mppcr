@@ -93,6 +93,12 @@ def is_real_task(t):
     return t is not None and t.getName() is not None and not t.getSummary()
 
 
+def is_complete(t):
+    """Tache marquee achevee (% Complete = 100)."""
+    pct_complete = t.getPercentageComplete()
+    return pct_complete is not None and float(pct_complete) >= 100.0
+
+
 def pct(n, d):
     return round(100.0 * n / d, 2) if d else 0.0
 
@@ -110,8 +116,13 @@ def check_logic(tasks):
     """1. Logic — % de taches sans predecesseur ni successeur, en excluant
     la tache de debut de projet (pas de predecesseur attendu) et la tache
     de fin de projet (pas de successeur attendu) -- une seule de chaque,
-    identifiees par la date de debut/fin la plus extreme."""
-    real = [t for t in tasks if is_real_task(t)]
+    identifiees par la date de debut/fin la plus extreme.
+
+    Conformement a la pratique DCMA, le controle ne porte que sur les taches
+    RESTANTES : les taches achevees (% Complete = 100) et les jalons sortent du
+    numerateur comme du denominateur, puisqu'on n'attend plus de lien aval sur
+    une tache terminee. C'est deja le choix de check_high_duration()."""
+    real = [t for t in tasks if is_real_task(t) and not t.getMilestone() and not is_complete(t)]
     if not real:
         return 0.0, 0, 0
 

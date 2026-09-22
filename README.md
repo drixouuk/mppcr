@@ -86,6 +86,30 @@ location / {
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
 les compteurs sont écrits par défaut dans `/app/data/usage.db`.
 
+## Contrôles DCMA-14
+
+Les quatorze contrôles suivent la pratique DCMA, avec deux précisions propres au
+diagnostic :
+
+- **Contrôle 1 (Logic)** ne porte que sur les **tâches restantes** : les jalons et
+  les tâches achevées (`% Complete = 100`) sortent du numérateur *comme* du
+  dénominateur, puisqu'on n'attend plus de lien aval sur une tâche terminée et
+  qu'un jalon n'en porte pas. C'est le choix déjà retenu par le contrôle 8 (durée
+  excessive). Sans cette restriction, tout planning comportant de l'historique est
+  signalé à tort : sur un plan témoin de 13 tâches dont 8 achevées, le contrôle
+  passait de 7,69 % (1/13, à corriger) à 0 % (0/5, conforme).
+- **Contrôle 12 (CPTest)** n'est jamais mesurable ici : il reste hors barème et
+  s'affiche « N/A (vérification manuelle requise) ».
+
+> **Changement de comportement en v1.6.0** — le contrôle 1 exclut désormais les
+> tâches achevées et les jalons. Le pourcentage, le décompte affiché et donc le
+> score de conformité changent sur tout planning comportant de l'historique. Les
+> **treize autres contrôles sont inchangés** : la sortie complète du diagnostic
+> sur le planning de référence ne diffère que par la ligne du contrôle 1 et le
+> récapitulatif. La référence figée des tests a été régénérée pour cette raison,
+> et le contrôle de non-régression la compare désormais réellement à une
+> exécution (il ne vérifiait auparavant que sa présence).
+
 ## Score de conformité
 
 La page de résultat et les exports affichent un **score sur 100** (`barème v1`) :
@@ -117,8 +141,10 @@ Cette colonne s'appuie sur l'option `--details` de `dcma14.py`, ajoutée pour
 l'occasion : elle n'ajoute qu'un bloc technique à la fin de la sortie, après la
 ligne « Resume ». **Sans cette option, la sortie du script est strictement
 identique** à celle des versions précédentes — une référence figée est comparée
-à chaque exécution des tests. Les contrôles sans écart affichent un tiret, et le
-contrôle 12 (vérification manuelle) n'a pas de liste.
+réellement à chaque exécution des tests (elle n'est régénérée que lorsqu'un
+contrôle change de comportement de façon délibérée, comme le contrôle 1 en
+v1.6.0). Les contrôles sans écart affichent un tiret, et le contrôle 12
+(vérification manuelle) n'a pas de liste.
 
 ## Exports
 
