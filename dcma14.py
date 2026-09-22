@@ -23,6 +23,11 @@ mpxj.startJVM()
 UniversalProjectReader = jpype.JClass("org.mpxj.reader.UniversalProjectReader")
 RelationType = jpype.JClass("org.mpxj.RelationType")
 ConstraintType = jpype.JClass("org.mpxj.ConstraintType")
+TimeUnit = jpype.JClass("org.mpxj.TimeUnit")
+
+# Calendrier du projet, renseigne a la lecture : il sert a ramener les durees en
+# jours ouvres (voir duration_days).
+PROJECT_CALENDAR = None
 
 # Seuils de tolerance standards DCMA-14
 THRESHOLDS = {
@@ -195,12 +200,28 @@ def pct(n, d):
 
 
 def duration_days(d):
+    """Duree ramenee en jours ouvres.
+
+    La bibliotheque rend la valeur brute dans l'unite portee par l'objet :
+    « d » pour un planning dont les durees sont exprimees en jours, « h » pour un
+    planning dont les durees sont en heures. Comparer cette valeur telle quelle a
+    un seuil exprime en jours (44) faussait les controles 6 et 8 : un planning en
+    heures voyait ainsi signalees toutes les taches depassant 44 HEURES, soit
+    environ 5,5 jours. On convertit donc en jours ouvres via le calendrier du
+    projet ; faute de calendrier, on retombe sur la valeur brute.
+    """
     if d is None:
         return 0.0
     try:
-        return float(d.getDuration())
+        valeur = float(d.getDuration())
     except Exception:
         return 0.0
+    if PROJECT_CALENDAR is not None:
+        try:
+            return float(d.convertUnits(TimeUnit.DAYS, PROJECT_CALENDAR).getDuration())
+        except Exception:
+            pass
+    return valeur
 
 
 def check_logic(tasks):
@@ -217,8 +238,11 @@ def check_logic(tasks):
     if not real:
         return 0.0, 0, 0
 
-    no_pred = [t for t in real if t.getPredecessors() is None or t.getPredecessors().size() == 0]
-    no_succ = [t for t in real if t.getSuccessors() is None or t.getSuccessors().size() == 0]
+    # On compte les liens par leur longueur plutot que par size() : JPype peut
+    # rendre une liste Python selon la configuration, et les deux formes sont
+    # alors equivalentes.
+    no_pred = [t for t in real if len(list(t.getPredecessors() or [])) == 0]
+    no_succ = [t for t in real if len(list(t.getSuccessors() or [])) == 0]
 
     project_start = min(no_pred, key=lambda t: t.getStart() or 0, default=None) if no_pred else None
     project_end = max(no_succ, key=lambda t: t.getFinish() or 0, default=None) if no_succ else None
@@ -451,6 +475,15 @@ def run_diagnostic(path):
     proj = reader.read(path)
     tasks = list(proj.getTasks())
     status_date = proj.getProjectProperties().getStatusDate()
+
+    # Calendrier du projet : indispensable pour ramener les durees en jours ouvres
+    # (les fichiers en heures sinon). Voir duration_days.
+    global PROJECT_CALENDAR
+    PROJECT_CALENDAR = None
+    try:
+        PROJECT_CALENDAR = proj.getProjectProperties().getDefaultCalendar()
+    except Exception:
+        PROJECT_CALENDAR = None
 
     if COLLECT_DETAILS:
         TASK_DETAILS.clear()
