@@ -88,27 +88,54 @@ les compteurs sont écrits par défaut dans `/app/data/usage.db`.
 
 ## Contrôles DCMA-14
 
-Les quatorze contrôles suivent la pratique DCMA, avec deux précisions propres au
-diagnostic :
+Le périmètre de chaque contrôle suit les définitions du référentiel, qui précisent
+la population sur laquelle la métrique est calculée (source :
+[DCMA 14-Point Assessment Metric Descriptions, Deltek Acumen](https://api.deltek.com/Product/Acumen/8.3/GA/DCMA%2014%20Point%20Assessment%20Metric%20Descriptions.html)).
 
-- **Contrôle 1 (Logic)** ne porte que sur les **tâches restantes** : les jalons et
-  les tâches achevées (`% Complete = 100`) sortent du numérateur *comme* du
-  dénominateur, puisqu'on n'attend plus de lien aval sur une tâche terminée et
-  qu'un jalon n'en porte pas. C'est le choix déjà retenu par le contrôle 8 (durée
-  excessive). Sans cette restriction, tout planning comportant de l'historique est
-  signalé à tort : sur un plan témoin de 13 tâches dont 8 achevées, le contrôle
-  passait de 7,69 % (1/13, à corriger) à 0 % (0/5, conforme).
-- **Contrôle 12 (CPTest)** n'est jamais mesurable ici : il reste hors barème et
-  s'affiche « N/A (vérification manuelle requise) ».
+**Tâches restantes.** Les contrôles **1 à 10** ne portent que sur les tâches **non
+terminées** (`% Complete < 100`) : leurs formules sont toutes de la forme
+« … / nombre de tâches non terminées ». Les jalons restent en outre exclus des
+contrôles 1, 8 et 10, où les notions de lien aval, de durée ou de ressource n'ont
+pas de sens. Les contrôles **11 (Missed tasks)** et **14 (BEI)** portent au
+contraire sur les tâches **terminées** — ils n'utilisent pas ce filtre — tout comme
+le 13 (CPLI), calculé sur le chemin critique, et le 12 (CPTest), vérification
+manuelle.
 
-> **Changement de comportement en v1.6.0** — le contrôle 1 exclut désormais les
-> tâches achevées et les jalons. Le pourcentage, le décompte affiché et donc le
-> score de conformité changent sur tout planning comportant de l'historique. Les
-> **treize autres contrôles sont inchangés** : la sortie complète du diagnostic
-> sur le planning de référence ne diffère que par la ligne du contrôle 1 et le
-> récapitulatif. La référence figée des tests a été régénérée pour cette raison,
-> et le contrôle de non-régression la compare désormais réellement à une
-> exécution (il ne vérifiait auparavant que sa présence).
+| # | Contrôle | Population | Formule du référentiel |
+| --- | --- | --- | --- |
+| 1 | Logic | tâches restantes, hors jalons | tâches sans lien ÷ tâches non terminées |
+| 2 | Leads | liens des tâches restantes | liens avec lead ÷ liens |
+| 3 | Lags | liens des tâches restantes | liens avec lag ÷ liens |
+| 4 | Relations | liens des tâches restantes | liens FS ÷ liens |
+| 5 | Contraintes dures | tâches restantes | tâches non terminées avec contrainte dure ÷ tâches non terminées |
+| 6 | Marge > 44 j | tâches restantes | idem |
+| 7 | Marge négative | tâches restantes | idem |
+| 8 | Durée > 44 j | tâches restantes, hors jalons | idem |
+| 9 | Dates invalides | tâches restantes | dates réelles futures ou dates prévues passées, sur les tâches non terminées |
+| 10 | Sans ressource | tâches restantes, hors jalons | idem |
+| 11 | Missed tasks | tâches terminées | terminées en retard ÷ échéances de baseline passées |
+| 12 | CPTest | — | vérification manuelle |
+| 13 | CPLI | chemin critique | (durée du chemin critique + marge totale) ÷ durée du chemin critique |
+| 14 | BEI | tout le planning | terminées ÷ à terminer selon la baseline |
+
+> **Changements de comportement.** *v1.6.0* : le contrôle 1 exclut les jalons et
+> les tâches achevées. *v1.7.0* : les contrôles 2 à 10 sont alignés sur le même
+> périmètre, comme le prescrit le référentiel. Les pourcentages, les décomptes et
+> donc le score de conformité changent sur tout planning comportant de l'historique :
+> sur un plan témoin de 13 tâches dont 8 achevées, le dénominateur des contrôles 2 à
+> 10 passe de 11-13 à 5-6 tâches, et le contrôle 9 (dates invalides) de 30,77 % à
+> 66,67 % — un historique « propre » diluait la mesure. Les contrôles 11 à 14 sont
+> inchangés. La référence figée des tests est régénérée à chaque changement de
+> périmètre, et le contrôle de non-régression la compare réellement à une exécution.
+
+**Écarts connus** par rapport au texte du référentiel, non corrigés à ce stade car
+ils touchent la *définition* des métriques et non leur population : le contrôle 8
+utilise la durée planifiée au lieu de la **durée de baseline** et n'applique pas la
+condition de « période de planification détaillée ou rolling wave » ; le contrôle 11
+compte au dénominateur les tâches ayant une date réelle de fin plutôt que celles
+dont l'échéance de baseline est passée ; le contrôle 10 n'applique pas la condition
+« durée supérieure à zéro avec charge en heures ou en devise affectée ». À traiter
+sur décision explicite, mesure avant/après à l'appui.
 
 ## Score de conformité
 

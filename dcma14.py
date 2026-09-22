@@ -99,6 +99,24 @@ def is_complete(t):
     return pct_complete is not None and float(pct_complete) >= 100.0
 
 
+def is_remaining(t):
+    """Tache restante au sens du referentiel DCMA : tache de detail non achevee.
+
+    Les controles 1 a 10 ne portent que sur les taches restantes — leurs formules
+    sont toutes de la forme « ... / nombre de taches non terminees » :
+      1 Logic       : taches sans lien amont/aval parmi les taches non terminees
+      2/3 Leads/Lags: liens avec lead (lag negatif) ou lag, parmi les taches non terminees
+      4 Relations   : repartition des types de liens des taches non terminees
+      5 Contraintes : contraintes dures parmi les taches non terminees
+      6/7 Marges    : marge > 44 j ou < 0 parmi les taches non terminees
+      8 Duree       : durees excessives parmi les taches non terminees
+      9 Dates       : dates reelles futures ou dates prevues passees des taches non terminees
+      10 Ressources : taches de detail non terminees sans ressource
+    Les controles 11 (Missed tasks) et 14 (BEI) portent au contraire sur les taches
+    terminees : ils ne doivent surtout pas utiliser ce filtre."""
+    return is_real_task(t) and not is_complete(t)
+
+
 def pct(n, d):
     return round(100.0 * n / d, 2) if d else 0.0
 
@@ -145,14 +163,17 @@ def check_logic(tasks):
 
 
 def check_leads_lags(tasks):
-    """2. Leads (lag negatif) / 3. Lags (lag positif) sur les relations."""
+    """2. Leads (lag negatif) / 3. Lags (lag positif) sur les relations.
+
+    Perimetre DCMA : les liens des taches RESTANTES. Formule :
+    (# de liens avec lead / # de liens) x 100."""
     total_rel = 0
     leads = 0
     lags = 0
     lead_tasks = []
     lag_tasks = []
     for t in tasks:
-        if t is None or t.getPredecessors() is None:
+        if t is None or not is_remaining(t) or t.getPredecessors() is None:
             continue
         for rel in t.getPredecessors():
             total_rel += 1
@@ -170,12 +191,15 @@ def check_leads_lags(tasks):
 
 
 def check_fs_relationships(tasks):
-    """4. Relationship types — % de relations Finish-to-Start."""
+    """4. Relationship types — % de relations Finish-to-Start.
+
+    Perimetre DCMA : les liens des taches RESTANTES. Formule :
+    (# de liens FS / # de liens) x 100."""
     total_rel = 0
     fs = 0
     non_fs_tasks = []
     for t in tasks:
-        if t is None or t.getPredecessors() is None:
+        if t is None or not is_remaining(t) or t.getPredecessors() is None:
             continue
         for rel in t.getPredecessors():
             total_rel += 1
@@ -188,8 +212,11 @@ def check_fs_relationships(tasks):
 
 
 def check_hard_constraints(tasks):
-    """5. Hard constraints — % de taches avec contrainte dure (MSO/MFO/SO/FO)."""
-    real = [t for t in tasks if is_real_task(t)]
+    """5. Hard constraints — % de taches avec contrainte dure (MSO/MFO/SO/FO).
+
+    Perimetre DCMA : taches RESTANTES. Formule :
+    (# de taches non terminees avec contrainte dure / # de taches non terminees) x 100."""
+    real = [t for t in tasks if is_remaining(t)]
     if not real:
         return 0.0, 0, 0
     bad_tasks = [t for t in real if t.getConstraintType() in HARD_CONSTRAINTS]
@@ -198,8 +225,10 @@ def check_hard_constraints(tasks):
 
 
 def check_high_float(tasks):
-    """6. High float — % de taches avec marge totale > 44 jours."""
-    real = [t for t in tasks if is_real_task(t)]
+    """6. High float — % de taches avec marge totale > 44 jours.
+
+    Perimetre DCMA : taches RESTANTES."""
+    real = [t for t in tasks if is_remaining(t)]
     if not real:
         return 0.0, 0, 0
     bad_tasks = [t for t in real if duration_days(t.getTotalSlack()) > HIGH_FLOAT_DAYS]
@@ -208,8 +237,10 @@ def check_high_float(tasks):
 
 
 def check_negative_float(tasks):
-    """7. Negative float — % de taches avec marge totale negative."""
-    real = [t for t in tasks if is_real_task(t)]
+    """7. Negative float — % de taches avec marge totale negative.
+
+    Perimetre DCMA : taches RESTANTES."""
+    real = [t for t in tasks if is_remaining(t)]
     if not real:
         return 0.0, 0, 0
     bad_tasks = [t for t in real if duration_days(t.getTotalSlack()) < 0]
@@ -218,8 +249,10 @@ def check_negative_float(tasks):
 
 
 def check_high_duration(tasks):
-    """8. High duration — % de taches de detail avec duree > 44 jours."""
-    real = [t for t in tasks if is_real_task(t) and not t.getMilestone()]
+    """8. High duration — % de taches de detail avec duree > 44 jours.
+
+    Perimetre DCMA : taches RESTANTES, hors jalons (un jalon n'a pas de duree)."""
+    real = [t for t in tasks if is_remaining(t) and not t.getMilestone()]
     if not real:
         return 0.0, 0, 0
     bad_tasks = [t for t in real if duration_days(t.getDuration()) > HIGH_DURATION_DAYS]
@@ -228,11 +261,12 @@ def check_high_duration(tasks):
 
 
 def check_invalid_dates(tasks, status_date):
-    """9. Invalid dates — dates prevues avant la date d'etat, ou dates
-    reelles apres la date d'etat. Necessite une date d'etat renseignee."""
+    """9. Invalid dates — Perimetre DCMA : taches RESTANTES, dont on verifie
+    qu'elles n'ont ni date reelle posterieure a la date d'etat, ni date prevue
+    anterieure a cette date. Necessite une date d'etat renseignee."""
     if status_date is None:
         return None, 0, 0
-    real = [t for t in tasks if is_real_task(t)]
+    real = [t for t in tasks if is_remaining(t)]
     bad_tasks = []
     for t in real:
         af = t.getActualFinish()
@@ -240,9 +274,7 @@ def check_invalid_dates(tasks, status_date):
             bad_tasks.append(t)
             continue
         finish = t.getFinish()
-        pct_complete = t.getPercentageComplete()
-        incomplete = pct_complete is None or float(pct_complete) < 100.0
-        if incomplete and finish is not None and finish.isBefore(status_date):
+        if finish is not None and finish.isBefore(status_date):
             bad_tasks.append(t)
     record_detail(9, bad_tasks)
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
@@ -250,8 +282,10 @@ def check_invalid_dates(tasks, status_date):
 
 def check_resources(tasks):
     """10. Resources — % de taches de detail sans ressource affectee
-    (indicatif, pas de seuil DCMA strict)."""
-    real = [t for t in tasks if is_real_task(t) and not t.getMilestone()]
+    (indicatif, pas de seuil DCMA strict).
+
+    Perimetre DCMA : taches RESTANTES, hors jalons."""
+    real = [t for t in tasks if is_remaining(t) and not t.getMilestone()]
     if not real:
         return 0.0, 0, 0
     bad_tasks = []
