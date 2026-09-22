@@ -9,7 +9,7 @@ services:
       ANALYSIS_TIMEOUT: 300  # un fichier pathologique est coupé au bout de 5 min
       DAILY_ANALYSIS_LIMIT: "5"
       MAX_CONCURRENT_ANALYSES: 2  # deux analyses de front, soit deux JVM de 1,5 Go
-      MAX_UPLOAD_MB: "5"          # taille maximale du planning accepté
+      MAX_UPLOAD_MB: "20"          # taille maximale du planning accepté
       # Mémoire allouée à chaque analyse (valeur de l'image, ajustable ici) :
       # 1,5 Go couvrent largement un planning très détaillé (mesures du 21/09 :
       # un million d'entrées d'avancement daté demande 792 Mo, un plan courant

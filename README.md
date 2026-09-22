@@ -80,7 +80,7 @@ location / {
 | `ANALYSIS_TIMEOUT` | `300` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
 | `DAILY_ANALYSIS_LIMIT` | `5` | Nombre d'analyses autorisées par adresse IP et par jour calendaire. |
 | `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
-| `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo. Au-delà, refus avec un message explicite. |
+| `MAX_UPLOAD_MB` | `20` | Taille maximale du planning accepté, en Mo (5 Mo par défaut dans l'image, 20 Mo dans le compose de production). Au-delà, refus avec un message explicite. |
 | `JAVA_TOOL_OPTIONS` | `-Xmx1536m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
@@ -171,7 +171,7 @@ garde-fous ont été ajoutés :
 | Garde-fou | Effet |
 | --- | --- |
 | `JAVA_TOOL_OPTIONS=-Xmx1536m …` (image) | borne le tas de chaque analyse : de 7,8 Go à 1,5 Go |
-| `MAX_UPLOAD_MB` (défaut 5) | refuse les fichiers trop gros par un message explicite, avant lecture |
+| `MAX_UPLOAD_MB` (20 en production, 5 par défaut) | refuse les fichiers trop gros par un message explicite, avant lecture |
 | `mem_limit: 5g` + `oom_score_adj: 500` (compose) | le conteneur ne peut pas affamer ses voisins, et c'est lui que le noyau tue en premier |
 | `ANALYSIS_TIMEOUT=300` | un fichier pathologique est coupé au bout de 5 minutes, jamais la journée |
 
@@ -187,6 +187,16 @@ Cette dernière phrase n'est pas théorique : un planning corrompu **s'ouvre
 normalement dans MS Project** tout en étant illisible pour la bibliothèque de
 lecture, qui épuise alors n'importe quelle mémoire disponible. Le seul remède
 connu est de recopier le contenu du planning dans un fichier neuf.
+
+**Régressions de la bibliothèque de lecture.** MPXJ 16.7.0 introduit une
+allocation non bornée dans `TimephasedDataFactory` sur certains `.mpp` : le
+diagnostic échoue en `OutOfMemoryError` **quelle que soit la mémoire allouée**,
+y compris 6 Go, sur un fichier de moins de 2 Mo — et le vidage de tas ne montre
+alors que des objets fabriqués en boucle, pas les données du planning. La version
+16.6.0 lit ces mêmes fichiers en 2 s et 117 Mo. Le pin est donc volontairement
+maintenu à **16.6.0** (voir la note dans `requirements.txt` et `joniles/mpxj#932`,
+fermée sans correctif faute de fichier de reproduction) : ne remonter la
+dépendance qu'après avoir vérifié la version suivante sur un fichier réel.
 
 **Pour accepter de plus gros plannings**, si la machine en a les moyens :
 
