@@ -165,10 +165,40 @@ def print_details():
         print()
 
 
+def is_external(t):
+    """Tache appartenant a un AUTRE planning (lien inter-projets).
+
+    Ces taches ne sont pas les notres : leurs liens amont et aval vivent dans un
+    autre fichier, que l'analyse ne charge pas. Les inclure revient a leur imputer
+    des defauts de logique qu'on ne peut pas constater ici — c'est exactement ce
+    qui faisait signaler 16 taches sur 44 dans un planning reel.
+
+    L'accesseur utilisable est getExternalTask(), qui rend un booleen et vaut vrai
+    pour ces taches seulement. PIEGE : getExternalProject() rend False (et non
+    None) y compris pour les taches ordinaires ; un test « is not None » sur sa
+    valeur exclurait donc TOUTES les taches, et le diagnostic afficherait 0/0
+    partout.
+    """
+    if t is None:
+        return False
+    try:
+        valeur = t.getExternalTask()
+    except Exception:
+        return False
+    if valeur is None:
+        return False
+    try:
+        return bool(valeur)
+    except Exception:
+        return False
+
+
 def is_real_task(t):
-    """Exclut les taches recapitulatives (summary) et les jalons pour
-    certains controles ou l'on ne veut que les taches de detail."""
-    return t is not None and t.getName() is not None and not t.getSummary()
+    """Exclut les taches recapitulatives (summary), les taches d'un autre planning
+    et les jalons pour certains controles ou l'on ne veut que les taches de
+    detail."""
+    return (t is not None and t.getName() is not None and not t.getSummary()
+            and not is_external(t))
 
 
 def is_complete(t):

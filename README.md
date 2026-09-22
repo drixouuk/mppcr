@@ -118,6 +118,19 @@ manuelle.
 | 13 | CPLI | chemin critique | (durée du chemin critique + marge totale) ÷ durée du chemin critique |
 | 14 | BEI | tout le planning | terminées ÷ à terminer selon la baseline |
 
+**Tâches d'un autre planning.** Les tâches marquées comme **externes**
+(`getExternalTask()`, liens inter-projets) sont **hors périmètre de tous les
+contrôles** : leurs liens amont et aval vivent dans un autre fichier, que l'analyse
+ne charge pas. Les inclure revenait à leur imputer des défauts de logique
+invérifiables ici — sur un planning réel, 16 des 44 signalements du contrôle 1
+étaient des tâches d'un autre projet. Elles restent comptées dans le diagnostic
+`DIAG|TOTAL` sous `externes=`, pour que l'information ne soit pas perdue.
+
+> Attention à l'accesseur : `getExternalTask()` rend un booléen utilisable
+> directement, alors que `getExternalProject()` rend `False` — et non `None` —
+> **y compris pour les tâches ordinaires**. Un test `is not None` sur cette valeur
+> exclurait toutes les tâches et afficherait `0/0` sur chaque contrôle.
+
 > **Changements de comportement.** *v1.6.0* : le contrôle 1 exclut les jalons et
 > les tâches achevées. *v1.7.0* : les contrôles 2 à 10 sont alignés sur le même
 > périmètre, comme le prescrit le référentiel. Les pourcentages, les décomptes et
