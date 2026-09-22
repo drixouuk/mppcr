@@ -150,6 +150,67 @@ dont l'échéance de baseline est passée ; le contrôle 10 n'applique pas la co
 « durée supérieure à zéro avec charge en heures ou en devise affectée ». À traiter
 sur décision explicite, mesure avant/après à l'appui.
 
+## Simulation Monte Carlo
+
+La seconde analyse est une **simulation de risque planning** : pour chaque tâche,
+une distribution PERT (optimiste / probable / pessimiste) est construite à partir
+de la durée planifiée et des facteurs `--opt` / `--pess` (0,8 et 1,5 par défaut),
+ou de vraies estimations 3-points fournies dans un CSV (`--estimates`,
+`task_id,optimistic,most_likely,pessimistic` en jours). N tirages sont ensuite
+enchaînés par un passage avant sur le réseau de dépendances, et le script rend
+**P50 / P80 / P90** de la durée, plus un **indice de criticité par tâche** (part
+des simulations où la tâche est sur le chemin critique).
+
+**Population simulée**, différente de celle des contrôles DCMA :
+
+| Catégorie | Traitement | Pourquoi |
+| --- | --- | --- |
+| Tâche récapitulative | exclue | elle doublerait ses tâches de détail |
+| Jalon, durée nulle | à 0 dans toutes les branches | pas de risque de durée propre |
+| **Tâche achevée** | **durée gelée** (o = m = p) | son avenir est connu : lui attribuer ±20 % / +50 % fabriquait de la dispersion à partir du passé |
+| **Tâche externe** | **durée gelée** | le risque d'un autre planning n'est pas le nôtre à modéliser |
+
+Ces deux dernières catégories **restent dans le réseau** — les retirer casserait
+les liens qui les traversent et ferait s'effondrer la durée simulée — mais elles
+n'ajoutent aucune incertitude. C'est l'inverse du choix fait pour le diagnostic,
+où elles sont au contraire **exclues** du périmètre. Le script annonce le nombre
+de tâches gelées dans sa sortie.
+
+Les durées sont converties en **jours ouvrés** via le calendrier du projet, comme
+dans `dcma14.py` : sans cela, un planning dont les durées sont exprimées en heures
+était simulé en heures puis affiché en « jours » (dix tâches de 40 h donnaient
+400 j au lieu de 50 j).
+
+Deux garde-fous : sans aucun lien exploitable, la simulation s'arrête avec un
+message explicite plutôt que de traiter chaque tâche comme indépendante ; et un
+réseau contenant une boucle de dépendances est refusé.
+
+### Évolutions envisagées (non implémentées)
+
+1. **Tableau par macro-tâche de niveau 1** (les « programmes ») : reste-à-faire
+   P50, fin prévisionnelle P50/P80 et incertitude (P80 − P50) par programme. Les
+   briques nécessaires existent : `Task.getOutlineLevel()` pour repérer les
+   programmes, `Task.getParentTask()` pour y rattacher chaque tâche de détail (les
+   détails hors programme iraient dans un seau « hors programme »), et
+   `ProjectCalendar.getDate()` pour convertir des jours ouvrés en date réelle, en
+   sautant week-ends et jours fériés. L'implémentation consiste à ajouter, par
+   simulation, l'étendue de chaque programme (`min` des débuts → `max` des fins de
+   ses tâches de détail) : **une passe linéaire sur les tâches**, soit environ 10 %
+   du temps de calcul, le poste dominant restant le tirage PERT par tâche. Se
+   limiter au niveau 1 garde le tableau petit (N simulations × nombre de
+   programmes). Restent à trancher : colonnes exactes, affichage des programmes
+   sans travail restant, cas d'un planning sans date d'état, et présence ou non
+   dans les exports CSV/Excel.
+2. **Bascule en « durée restante / fin prévisionnelle »** : aujourd'hui la
+   simulation affiche la durée **totale depuis le jour 0**, passé compris, et
+   n'utilise ni la date d'état ni `Task.getRemainingDuration()`. Pour un planning
+   en cours, on attend plutôt le **reste-à-faire** et une **date de fin
+   prévisionnelle** ancrée sur la date d'état. C'est un changement de
+   signification, pas un correctif, et il repose sur un CPM du travail restant
+   **simplifié** : toute tâche simulée est supposée pouvoir démarrer à la date
+   d'état (les dates réelles déjà passées ne sont pas rejouées, et il n'y a pas de
+   nivellement des ressources).
+
 ## Score de conformité
 
 La page de résultat et les exports affichent un **score sur 100** (`barème v1`) :

@@ -8,6 +8,11 @@ Principe :
   - Pour chaque tache, genere une distribution PERT (optimiste / probable /
     pessimiste) a partir de la duree planifiee et des facteurs --opt/--pess
     (ou d'une estimation 3-points fournie via un CSV, voir --estimates).
+  - N'attribue AUCUNE incertitude au travail deja termine ni aux taches d'un
+    autre planning (taches externes) : leur duree est gelee. Elles restent dans
+    le reseau, sinon les liens qui les traversent seraient perdus, mais elles ne
+    fabriquent plus de dispersion. C'est la difference avec dcma14.py, ou ces
+    taches sont au contraire exclues du perimetre des controles.
   - Fait tourner N simulations : a chaque iteration, tire une duree aleatoire
     par tache et recalcule la date de fin de projet par un passage avant
     (forward pass) sur le graphe de dependances (networkx).
@@ -31,15 +36,56 @@ import jpype
 
 mpxj.startJVM()
 UniversalProjectReader = jpype.JClass("org.mpxj.reader.UniversalProjectReader")
+TimeUnit = jpype.JClass("org.mpxj.TimeUnit")
+
+# Calendrier du projet, renseigne a la lecture : il ramene les durees en jours
+# ouvres (voir duration_days).
+PROJECT_CALENDAR = None
 
 
 def duration_days(d):
+    """Duree ramenee en jours ouvres.
+
+    La bibliotheque rend la valeur brute dans l'unite portee par l'objet : « d »
+    pour un planning dont les durees sont exprimees en jours, « h » pour un
+    planning en heures. Sans conversion, un planning en heures etait simule en
+    heures et le resultat affiche en « jours » : dix taches de 40 h donnaient
+    ainsi 400 j au lieu de 50 j. On convertit donc via le calendrier du projet,
+    avec repli sur la valeur brute si la conversion echoue.
+    """
     if d is None:
         return 0.0
     try:
-        return float(d.getDuration())
+        valeur = float(d.getDuration())
     except Exception:
         return 0.0
+    if PROJECT_CALENDAR is not None:
+        try:
+            return float(d.convertUnits(TimeUnit.DAYS, PROJECT_CALENDAR).getDuration())
+        except Exception:
+            pass
+    return valeur
+
+
+def est_gelee(t):
+    """Tache dont l'incertitude ne doit pas etre simulee : deja terminee
+    (% Complete = 100) ou appartenant a un autre planning (tache externe).
+
+    Ces taches restent dans le reseau -- les retirer casserait les liens qui les
+    traversent et ferait s'effondrer la duree simulee -- mais leur duree est
+    gelee, donc elles n'ajoutent aucune dispersion. L'accesseur getExternalTask()
+    rend un booleen ; getExternalProject() rend False et non None pour toutes les
+    taches, il ne faut pas s'en servir."""
+    try:
+        avancement = t.getPercentageComplete()
+        if avancement is not None and float(avancement) >= 100.0:
+            return True
+    except Exception:
+        pass
+    try:
+        return bool(t.getExternalTask())
+    except Exception:
+        return False
 
 
 def load_estimates_csv(path):
@@ -60,17 +106,27 @@ def load_estimates_csv(path):
 def build_graph(proj, opt_factor, pess_factor, estimates):
     """Construit le graphe de dependances. Chaque noeud porte ses 3 parametres
     PERT (o, m, p) en jours. Les jalons (duree 0) restent a 0 dans toutes les
-    branches de l'estimation (pas de risque de duree propre a simuler)."""
+    branches de l'estimation (pas de risque de duree propre a simuler), et les
+    taches gelees (achevees ou externes) gardent o = m = p : aucune incertitude
+    ne leur est attribuee. Rend (graphe, nombre de liens, nombre de taches gelees).
+    """
     G = nx.DiGraph()
     tasks = {int(t.getUniqueID()): t for t in proj.getTasks()
              if t is not None and t.getName() is not None and not t.getSummary()}
 
+    gelees = 0
     for uid, t in tasks.items():
         m = duration_days(t.getDuration())
-        if uid in estimates:
+        if uid in estimates and not est_gelee(t):
             o, m, p = estimates[uid]
         elif t.getMilestone() or m == 0:
             o, m, p = 0.0, 0.0, 0.0
+        elif est_gelee(t):
+            # Travail deja fait ou d'un autre planning : duree connue, donc
+            # aucune dispersion a simuler (une estimation explicite serait un
+            # contresens ici : on l'ignore volontairement).
+            o, p = m, m
+            gelees += 1
         else:
             o, p = m * opt_factor, m * pess_factor
         G.add_node(uid, name=str(t.getName()), o=o, m=m, p=p)
@@ -90,7 +146,7 @@ def build_graph(proj, opt_factor, pess_factor, estimates):
                 G.add_edge(pred_uid, uid, lag=lag)
                 n_links += 1
 
-    return G, n_links
+    return G, n_links, gelees
 
 
 def sample_pert(o, m, p, rng, shape=4.0):
@@ -172,14 +228,24 @@ def main():
     reader = UniversalProjectReader()
     proj = reader.read(args.path)
 
+    # Calendrier du projet : il sert a ramener les durees en jours ouvres.
+    global PROJECT_CALENDAR
+    PROJECT_CALENDAR = None
+    try:
+        PROJECT_CALENDAR = proj.getProjectProperties().getDefaultCalendar()
+    except Exception:
+        PROJECT_CALENDAR = None
+
     estimates = load_estimates_csv(args.estimates) if args.estimates else {}
-    G, n_links = build_graph(proj, args.opt, args.pess, estimates)
+    G, n_links, gelees = build_graph(proj, args.opt, args.pess, estimates)
 
     print("=" * 72)
     print(f"SIMULATION MONTE CARLO — {args.path}")
     print("=" * 72)
     print(f"Taches de detail : {G.number_of_nodes()}")
     print(f"Liens de dependance : {n_links}")
+    print(f"Taches gelees (achevees ou externes) : {gelees} "
+          "-- duree connue, aucune incertitude simulee")
 
     if n_links == 0:
         print()
