@@ -185,6 +185,17 @@ Deux garde-fous : sans aucun lien exploitable, la simulation s'arrête avec un
 message explicite plutôt que de traiter chaque tâche comme indépendante ; et un
 réseau contenant une boucle de dépendances est refusé.
 
+**Coût mesuré.** `run_simulation()` est en Python pur : le temps croît comme
+`simulations × tâches`. Mesures sur un plan de 24 000 tâches (20 571 liens) :
+100 simulations en 18,6 s, 300 en 43,8 s, soit **0,126 s par simulation** plus
+environ 6 s fixes (démarrage JVM, lecture, construction du graphe) — donc
+**≈ 636 s pour les 5 000 simulations du formulaire**, au-delà du
+`ANALYSIS_TIMEOUT` de 300 s. Le pic mémoire reste modeste (280 Mo) : la limite est
+de **temps**, pas de mémoire. Ordres de grandeur : ~500 tâches → 15-20 s ;
+~10 000 tâches → ~4,5 min ; au-delà, l'analyse est coupée par le délai maximal.
+La vectorisation numpy (traitement par niveaux topologiques) est identifiée comme
+la parade si des plannings de cette taille deviennent courants.
+
 **Fiabilité affichée.** Quand le diagnostic DCMA-14 accompagne la simulation dans
 la même analyse, l'avertissement de fiabilité reprend la **valeur réelle du
 contrôle 1** — « 33,7 % des tâches restantes (26/77) n'ont pas de logique amont ou
@@ -464,6 +475,13 @@ Dockerfile        python:3.11-slim + JRE headless (MPXJ/jpype1) + Gunicorn (2 wo
 `dcma14.py` et `montecarlo.py` ne sont jamais modifiés : ils sont exécutés en
 subprocess par `app.py`, qui met en forme leurs sorties. Ils utilisent `mpxj` et
 `jpype1` pour lire les `.mpp` via une JVM embarquée.
+
+## Journal des versions
+
+Les correctifs et les changements de comportement sont consignés dans
+[`CHANGELOG.md`](CHANGELOG.md), avec les effets mesurés à l'appui. Le fichier
+`VERSION` — voir « Quelle version tourne ? » — indique la version effectivement
+déployée.
 
 ## Publication de l'image
 

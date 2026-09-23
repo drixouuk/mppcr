@@ -39,6 +39,12 @@ THRESHOLDS = {
     "high_float": 5.0,      # % de taches avec marge totale > 44j
     "negative_float": 0.0,  # % de taches avec marge negative
     "high_duration": 5.0,   # % de taches (non-recap) avec duree > 44j
+    # Indices de confiance du planning (attendus du referentiel DCMA-14) : ils
+    # etaient ecrits en clair dans run_diagnostic(), ils sont regroupes ici avec
+    # les autres seuils pour qu'un changement de bareme se fasse en un seul point.
+    "cpli_min": 0.95,       # CPLI attendu entre 0,95 et 1,44
+    "cpli_max": 1.44,
+    "bei_min": 0.95,        # BEI attendu au-dessus de 0,95
 }
 HIGH_FLOAT_DAYS = 44
 HIGH_DURATION_DAYS = 44
@@ -324,8 +330,14 @@ def check_leads_lags(tasks):
 def check_fs_relationships(tasks):
     """4. Relationship types — % de relations Finish-to-Start.
 
-    Perimetre DCMA : les liens des taches RESTANTES. Formule :
-    (# de liens FS / # de liens) x 100."""
+    Perimetre DCMA : les liens des taches RESTANTES, et eux seuls. La boucle porte
+    donc sur is_remaining(t) et NON sur la liste brute des taches : les relations
+    portees par une tache RECAPITULATIVE ne comptent pas (une recapitulative n'est
+    pas une activite), pas plus que celles d'un jalon, d'une tache achevee ou d'une
+    tache d'un autre planning. Ce n'est pas un oubli — voir la section
+    « Controles DCMA-14 » du README, et la meme regle pour les controles 2 et 3.
+
+    Formule : (# de liens FS / # de liens) x 100."""
     total_rel = 0
     fs = 0
     non_fs_tasks = []
@@ -598,13 +610,13 @@ def run_diagnostic(path):
     cpli, n_crit = check_cpli(tasks)
     rows.append(("13. Critical Path Length Index (CPLI)",
                   f"{cpli}" if cpli is not None else "N/A", f"{n_crit} taches critiques",
-                  ("OK" if cpli is not None and 0.95 <= cpli <= 1.44 else
+                  ("OK" if cpli is not None and THRESHOLDS["cpli_min"] <= cpli <= THRESHOLDS["cpli_max"] else
                    ("N/A (aucune tache marquee critique)" if cpli is None else "A CORRIGER"))))
 
     bei, done, should = check_bei(tasks, status_date)
     rows.append(("14. Baseline Execution Index (BEI)",
                   f"{bei}" if bei is not None else "N/A", f"{done}/{should}",
-                  ("OK" if bei is not None and bei >= 0.95 else
+                  ("OK" if bei is not None and bei >= THRESHOLDS["bei_min"] else
                    ("N/A (baseline/date d'etat manquante)" if bei is None else "A CORRIGER"))))
 
     name_w = max(len(r[0]) for r in rows) + 2
