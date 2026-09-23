@@ -3,6 +3,41 @@
 Les versions antérieures à la v1.6.0 sont documentées dans les
 [releases GitHub](https://github.com/drixouuk/mppcr/releases).
 
+## v1.12.0
+
+### Ajouté
+- `montecarlo.py` : option **`--macro-level N`** — répartition du risque par lot
+  WBS, `N` étant le niveau de plan (`getOutlineLevel()`) des tâches récapitulatives
+  à traiter comme macro-tâches. Le moteur de simulation est **inchangé** (on simule
+  toujours au niveau détail) : on conserve simplement, à chaque itération, la date
+  de fin de chaque sous-arbre, d'où une corrélation entre lots qui ne demande
+  aucune hypothèse statistique supplémentaire. Sortie triée par P90 décroissant,
+  avec l'écart du P50 par rapport à la durée planifiée du lot et une criticité
+  comptée **une fois par lot et par itération** (et non par tâche).
+- Les tâches de détail hors de toute récapitulative du niveau demandé sont
+  regroupées sous « Tâches hors lot » ; un niveau inexistant est signalé avec la
+  liste des niveaux disponibles.
+- README : section « Répartition par macro-tâche » (architecture), avec exemple
+  d'usage et limites.
+
+### Mesuré
+- Sur un plan témoin à 4 programmes chaînés (29 tâches) : A 62,6 j → B 211,4 j →
+  C 234,5 j → D **330,9 j**, contre une fin globale de **330,9 j** — le dernier lot
+  porte bien la fin de projet, chaque lot finit après son prédécesseur.
+- Surcoût de l'option **non mesurable** : 17 s avec et sans, sur 3 000 tâches ×
+  1 000 simulations.
+- Sans l'option, la sortie reste **strictement identique** (référence figée
+  comparée à chaque exécution des tests).
+
+### Constat (défaut préexistant, non corrigé)
+- Les liens portés par une tâche **récapitulative** ne sont pas propagés à ses
+  tâches de détail : le graphe ne contient que les détails. Un planning qui enchaîne
+  ses lots par des liens de niveau récapitulatif est donc simulé avec des lots
+  démarrant trop tôt — la vue par macro-tâche le rend immédiatement visible (un lot
+  peut finir avant son prédécesseur). À traiter sur décision, en déplaçant les liens
+  sur les tâches de détail ou en propageant les liens de récapitulatif dans
+  `build_graph()`.
+
 ## v1.11.1
 
 ### Modifié

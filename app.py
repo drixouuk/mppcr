@@ -1220,6 +1220,14 @@ def parse_montecarlo_output(text):
             in_criticality = True
             continue
 
+        if stripped.startswith("Repartition par macro-tache"):
+            # Section produite par `montecarlo.py --macro-level` : l'application ne
+            # demande jamais cette option, mais un fichier de sortie peut en
+            # contenir. Ses lignes finissent elles aussi par un pourcentage, elles
+            # ne doivent donc pas être prises pour des entrées de criticité.
+            in_criticality = False
+            continue
+
         if in_criticality:
             match = re.match(r"^(.+?)\s+([0-9]+(?:\.[0-9]+)?)%$", stripped)
             if match:

@@ -476,6 +476,52 @@ Dockerfile        python:3.11-slim + JRE headless (MPXJ/jpype1) + Gunicorn (2 wo
 subprocess par `app.py`, qui met en forme leurs sorties. Ils utilisent `mpxj` et
 `jpype1` pour lire les `.mpp` via une JVM embarquée.
 
+### Répartition par macro-tâche (Monte Carlo)
+
+`montecarlo.py` simule toujours au niveau **détail**, là où vit la vraie structure
+de dépendances, mais il peut restituer le risque **par lot WBS** :
+
+```bash
+# Répartition par programme (tâches récapitulatives de niveau 1)
+python3 montecarlo.py planning.mpp --sims 5000 --macro-level 1
+
+# Par sous-lot (niveau 2)
+python3 montecarlo.py planning.mpp --sims 5000 --macro-level 2
+```
+
+`N` est le niveau de plan (`getOutlineLevel()`) des récapitulatives à traiter comme
+macro-tâches : 1 correspond aux lots juste sous la tâche de projet. Sortie ajoutée
+après le bloc global, triée par P90 décroissant :
+
+```
+Repartition par macro-tache (niveau 1) :
+  Programme D — Mise en service  P50: 330.9 j (+13.9 j vs planifie)   P80: 341.1 j   P90: 346.8 j   Criticite: 100.0%
+  Programme C — Formation        P50: 234.5 j (+9.5 j vs planifie)    P80: 243.7 j   P90: 248.2 j   Criticite: 100.0%
+```
+
+- **Sans l'option, la sortie est strictement identique** à celle des versions
+  précédentes : l'option est opt-in, comme `--details` dans `dcma14.py`, et la
+  référence figée des tests reste valable.
+- **Le moteur de simulation ne change pas** : on conserve simplement, à chaque
+  itération, la date de fin de chaque sous-arbre au lieu de ne garder que la fin
+  globale. La corrélation entre lots vient de ce qu'ils partagent les mêmes
+  tirages, sans hypothèse statistique supplémentaire.
+- La **criticité** d'un lot est la part des simulations où *au moins une* de ses
+  tâches est sur le chemin critique : une itération compte **une fois par lot**,
+  pas une fois par tâche — sinon un lot de 200 tâches paraîtrait cent fois plus
+  critique qu'un lot de 2 tâches à structure identique.
+- Les tâches de détail qui ne dépendent d'aucune récapitulative du niveau demandé
+  sont regroupées sous **« Tâches hors lot »**, pour que la vue reste complète.
+- Si le niveau demandé n'existe pas, le script le dit et liste les niveaux
+  disponibles (`Aucune tache recapitulative au niveau 9 -- niveaux disponibles : [1]`)
+  plutôt que d'afficher une section vide.
+- **Limite connue** : les liens portés par une tâche **récapitulative** ne sont pas
+  propagés à ses tâches de détail, puisque le graphe ne contient que les détails.
+  Un planning qui enchaîne ses lots par des liens de niveau récapitulatif est donc
+  simulé avec des lots démarrant trop tôt ; la vue par macro-tâche rend ce défaut
+  visible (un lot peut finir avant son prédécesseur). Ranger les liens sur les
+  tâches de détail, comme le fait MS Project dans un planning piloté, l'évite.
+
 ## Journal des versions
 
 Les correctifs et les changements de comportement sont consignés dans
