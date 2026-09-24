@@ -1,7 +1,7 @@
 services:
   mppcr:
     # Pinner une version en production, jamais :latest.
-    image: ghcr.io/drixouuk/mppcr:v1.4.0
+    image: ghcr.io/drixouuk/mppcr:v1.13.0
     container_name: mppcr
     restart: unless-stopped
     ports:
@@ -10,7 +10,7 @@ services:
       - ANALYSIS_TIMEOUT=300  # un fichier pathologique est coupé au bout de 5 min
       - DAILY_ANALYSIS_LIMIT=5   # analyses autorisées par IP et par jour
       - MAX_CONCURRENT_ANALYSES=2  # deux analyses de front, soit deux JVM de 1,5 Go
-      - MAX_UPLOAD_MB=20            # taille maximale du planning accepté
+      - MAX_UPLOAD_MB=5            # taille maximale du planning accepté
       # Mémoire allouée à la JVM d'analyse : à augmenter si vous acceptez de gros
       # plannings et disposez de la mémoire (1,5 Go ici par analyse ; garder le
       # total sous le plafond du conteneur, sinon le noyau tue la JVM).
