@@ -2,134 +2,162 @@
 
 {% block title %}MPPCR — Analyser un planning MS Project{% endblock %}
 
+{# Formulaire : trois étapes numérotées (fichier, analyse, options), panneau
+   d'appel à l'action collant à droite — structure de la maquette, sans
+   JavaScript obligatoire : le bouton est un vrai bouton d'envoi et la zone de
+   dépôt contient l'input natif. #}
 {% block content %}
-<section class="view">
-  <div class="page-head">
-    <h1>Analyser un planning</h1>
-    <p>Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur fichier <code>.mpp</code>.</p>
-  </div>
-
-  <form class="card card-pad" id="analyse-form" method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
-    {# Jeton d'annulation : permet d'interrompre l'analyse depuis la page d'attente. #}
-    <input type="hidden" name="client_token" id="client_token" value="{{ client_token }}">
-    <div class="field">
-      <label class="flabel" for="mpp_file">Fichier planning</label>
-      <div class="drop" id="drop" data-max-mb="{{ max_upload_mb|default(5) }}">
-        <input type="file" id="mpp_file" name="mpp_file" accept=".mpp" required>
-        <span class="ic">
-          <svg fill="none" stroke-width="2" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
-        </span>
-        <div class="t1"><span class="link">Parcourir…</span> ou glisser-déposer</div>
-        <div class="t2">.mpp uniquement · {{ max_upload_mb|default(5) }} Mo max</div>
-        <div class="fname" id="fname"></div>
-        <div class="hint" id="taille-note" hidden></div>
-      </div>
-      <div class="hint">
-        Le planning est analysé dans un répertoire temporaire supprimé en fin de requête :
-        aucun fichier n’est conservé. Les plannings les plus volumineux demandent beaucoup
-        de mémoire pour être lus et peuvent être refusés.
-      </div>
+<section class="view" id="view-form">
+  <div class="container">
+    <div class="page-head">
+      <h1>Analyser un planning</h1>
+      <p>Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur un fichier MS&nbsp;Project (.mpp).</p>
     </div>
 
-    <fieldset class="field">
-      <legend class="flabel">Analyse à exécuter</legend>
-      <div class="choices">
-        <div class="choice">
-          <input type="radio" name="analysis" id="a1" value="dcma" checked>
-          <label for="a1">
-            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Diagnostic qualité DCMA-14</span>
-            <span class="cd">14 contrôles avec cibles et actions recommandées.</span>
-          </label>
+    <form class="form-grid" id="analyse-form" method="post" action="{{ url_for('analyse') }}" enctype="multipart/form-data">
+      {# Jeton d'annulation : permet d'interrompre l'analyse depuis la page d'attente. #}
+      <input type="hidden" name="client_token" id="client_token" value="{{ client_token }}">
+      <div>
+        <!-- Étape 1 : fichier -->
+        <div class="card card-pad">
+          <div class="step-label"><span class="step-num">1</span><h2>Fichier planning</h2></div>
+          <div class="dropzone" id="drop" data-max-mb="{{ max_upload_mb|default(20) }}">
+            <input type="file" id="mpp_file" name="mpp_file" accept=".mpp" required>
+            <div class="dz-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2E5BFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="dz-title"><b>Glissez-déposez</b> votre planning ici, ou <b>parcourez</b> vos fichiers</div>
+            <div class="dz-hint">.mpp uniquement · {{ max_upload_mb|default(20) }} Mo max</div>
+            <div class="dz-file" id="dz-file" hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <span id="dz-file-label"></span>
+            </div>
+          </div>
+          <div class="privacy-note">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#667085" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Votre planning est analysé dans un répertoire temporaire supprimé en fin de requête : <b>aucun fichier n’est conservé</b>. Les plannings volumineux demandent beaucoup de mémoire et peuvent être refusés.</span>
+          </div>
         </div>
-        <div class="choice">
-          <input type="radio" name="analysis" id="a2" value="montecarlo">
-          <label for="a2">
-            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Simulation Monte Carlo</span>
-            <span class="cd">P50 / P80 / P90, contingence recommandée, criticité des tâches.</span>
-          </label>
+
+        <!-- Étape 2 : type d'analyse -->
+        <div class="card card-pad" style="margin-top:16px">
+          <div class="step-label"><span class="step-num">2</span><h2>Analyse à exécuter</h2></div>
+          <div class="type-grid">
+            <div class="type-card">
+              <input type="radio" name="analysis" id="a1" value="dcma">
+              <label for="a1">
+                <div class="type-title"><span class="radio"></span>Diagnostic qualité DCMA-14</div>
+                <div class="type-desc">14 contrôles avec cibles et actions recommandées.</div>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="analysis" id="a2" value="montecarlo">
+              <label for="a2">
+                <div class="type-title"><span class="radio"></span>Simulation Monte Carlo</div>
+                <div class="type-desc">P50 / P80 / P90, contingence recommandée, criticité des tâches.</div>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="analysis" id="a3" value="both" checked>
+              <label for="a3">
+                <div class="type-title"><span class="radio"></span>Les deux</div>
+                <div class="type-desc">Qualité DCMA puis risque planning. Recommandé.</div>
+              </label>
+            </div>
+          </div>
         </div>
-        <div class="choice">
-          <input type="radio" name="analysis" id="a3" value="both">
-          <label for="a3">
-            <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Les deux</span>
-            <span class="cd">Qualité DCMA puis risque planning.</span>
-          </label>
+
+        <!-- Étape 3 : options -->
+        <div style="margin-top:16px">
+          <details class="opt">
+            <summary>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export des résultats <span style="font-weight:400;color:var(--text-3)">(facultatif)</span>
+              <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </summary>
+            <div class="opt-body">
+              <div class="check-row">
+                <input type="checkbox" name="export" id="e1" value="csv" checked>
+                <span><span class="lbl">CSV</span><br><span class="sub">Séparateur « ; », BOM UTF-8 — compatible Excel FR</span></span>
+              </div>
+              <div class="check-row">
+                <input type="checkbox" name="export" id="e2" value="xlsx">
+                <span><span class="lbl">Excel (.xlsx)</span><br><span class="sub">Une feuille par analyse, verdicts colorés, score en tête</span></span>
+              </div>
+              <p class="small muted" style="margin-top:10px">Pour un PDF : <b>Imprimer → Enregistrer au format PDF</b> depuis la page de résultat.</p>
+            </div>
+          </details>
+
+          <details class="opt">
+            <summary>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+              Options avancées Monte Carlo
+              <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </summary>
+            <div class="opt-body">
+              <div class="field-row">
+                <div class="field">
+                  <label for="sims">Nombre de simulations</label>
+                  <select id="sims" name="sims">
+                    <option value="1000">1 000 (rapide, exploratoire)</option>
+                    <option value="5000" selected>5 000 (recommandé)</option>
+                    <option value="10000">10 000 (précis, plus long)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="factors">Facteurs PERT (optimiste / pessimiste)</label>
+                  <select id="factors" name="factors">
+                    <option value="0.8/1.5" selected>0,8 / 1,5 (défaut)</option>
+                    <option value="0.7/1.8">0,7 / 1,8 (plus prudent)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="est">Estimations 3 points (CSV facultatif)</label>
+                <input type="file" id="est" name="estimates_file" accept=".csv">
+                <p class="small muted" style="margin-top:6px">Format : <span class="mono">task_id,optimistic,most_likely,pessimistic</span> en jours.</p>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
-    </fieldset>
 
-    <details class="adv">
-      <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Export des résultats (facultatif)</summary>
-      <div class="adv-body">
-        <div class="hint">
-          Les résultats sont toujours affichés dans le navigateur. Cochez pour obtenir
-          en plus un fichier à télécharger depuis la page de résultat. Pour un PDF,
-          utilisez ensuite l’impression du navigateur.
-        </div>
-        <div class="choices is-pair">
-          <div class="choice">
-            <input type="checkbox" name="export" id="x1" value="csv">
-            <label for="x1">
-              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Fichier CSV</span>
-              <span class="cd">Tableur, séparateur « ; », encodage UTF-8.</span>
-            </label>
-          </div>
-          <div class="choice">
-            <input type="checkbox" name="export" id="x2" value="xlsx">
-            <label for="x2">
-              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Classeur Excel</span>
-              <span class="cd">Une feuille par analyse, verdicts colorés.</span>
-            </label>
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details class="adv">
-      <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Options avancées Monte Carlo</summary>
-      <div class="adv-body">
-        <div class="grid4">
-          <div>
-            <label for="sims">Simulations</label>
-            <input class="in" type="number" id="sims" name="sims" value="5000" min="100" max="50000" step="100">
-          </div>
-          <div>
-            <label for="opt">Facteur optimiste</label>
-            <input class="in" type="number" id="opt" name="opt" value="0.8" step="0.05">
-          </div>
-          <div>
-            <label for="pess">Facteur pessimiste</label>
-            <input class="in" type="number" id="pess" name="pess" value="1.5" step="0.05">
-          </div>
-          <div>
-            <label for="estimates_file">CSV d’estimations</label>
-            <input class="in in-file" type="file" id="estimates_file" name="estimates_file" accept=".csv">
+      <!-- Panneau CTA -->
+      <aside class="cta-panel">
+        <div class="card">
+          <div class="card-pad">
+            <div class="cta-summary">
+              <b id="cta-file">Aucun planning choisi</b><br>
+              <span id="cta-mode">Diagnostic DCMA-14 + Monte Carlo</span><br>
+              <span id="cta-opts">5 000 simulations · export CSV</span>
+            </div>
+            <button class="btn btn-primary" type="submit">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              Lancer l’analyse
+            </button>
+            {% if quota_remaining is not none %}
+              <div class="quota{% if quota_remaining == 0 %} is-empty{% endif %}">
+                <span class="dot"></span>
+                <span>
+                  {%- if quota_remaining == 0 -%}
+                    <b>Quota quotidien atteint</b> : aucune analyse restante aujourd’hui pour votre adresse IP.
+                  {%- elif quota_remaining == 1 -%}
+                    <b>1 analyse restante</b> aujourd’hui pour votre adresse IP.
+                  {%- else -%}
+                    <b>{{ quota_remaining }} analyses restantes</b> aujourd’hui pour votre adresse IP.
+                  {%- endif -%}
+                </span>
+              </div>
+            {% endif %}
+            <div class="confid">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Analyse chiffrée et exécutée localement, sans conservation.
+            </div>
           </div>
         </div>
-        <div class="hint">Format CSV : <code>task_id,optimistic,most_likely,pessimistic</code></div>
-      </div>
-    </details>
-
-    <button class="btn btn-block" type="submit">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-      Lancer l’analyse
-    </button>
-
-    {% if quota_remaining is not none %}
-      <div class="quota{% if quota_remaining == 0 %} is-empty{% endif %}">
-        <span class="pulse"></span>
-        <span>
-          {%- if quota_remaining == 0 -%}
-            Quota quotidien atteint : aucune analyse restante aujourd’hui pour votre adresse IP.
-          {%- elif quota_remaining == 1 -%}
-            1 analyse restante aujourd’hui pour votre adresse IP.
-          {%- else -%}
-            {{ quota_remaining }} analyses restantes aujourd’hui pour votre adresse IP.
-          {%- endif -%}
-        </span>
-      </div>
-    {% endif %}
-  </form>
+      </aside>
+    </form>
+  </div>
 </section>
 
 {# Page d'attente affichée par le JavaScript au moment de l'envoi : le
@@ -140,83 +168,95 @@
   <div class="card card-pad overlay-card" role="status" aria-live="polite">
     <div class="overlay-spin" aria-hidden="true"></div>
     <div class="overlay-title">Analyse en cours…</div>
-    <div class="hint" id="waiting-time">Temps écoulé : 0 s</div>
+    <div class="small muted" id="waiting-time">Temps écoulé : 0 s</div>
     <div id="waiting-steps">
       <div class="overlay-step">Étapes prévues :</div>
     </div>
-    <div class="hint">
+    <p class="small muted" style="margin-top:10px">
       Le diagnostic DCMA-14 prend quelques secondes ; la simulation Monte Carlo est
       l’étape la plus longue et dépend du nombre de simulations. Cette page se
       remplacera automatiquement par le résultat.
-    </div>
-    <div class="hint" id="waiting-slow" hidden>
+    </p>
+    <p class="small muted" id="waiting-slow" hidden>
       L’analyse dépasse la minute : un planning volumineux ou un grand nombre de
       simulations peut demander plusieurs minutes.
-    </div>
-    <button class="btn btn-ghost" type="button" id="cancel-btn">Arrêter l’analyse</button>
-    <div class="hint" id="cancel-state" hidden>
+    </p>
+    <button class="btn btn-ghost" type="button" id="cancel-btn" style="margin-top:12px">Arrêter l’analyse</button>
+    <div class="small muted" id="cancel-state" hidden>
       Arrêt demandé : l’analyse va s’interrompre sans décompter votre quota.
     </div>
   </div>
 </div>
 
-{# Confort uniquement : nom du fichier choisi et glisser-déposer. Le formulaire
-   reste entièrement fonctionnel sans JavaScript (l'input natif est superposé
-   à la zone pointillée et ouvre le sélecteur au clic). #}
-<script>
-  (function () {
-    var drop = document.getElementById("drop");
-    var input = document.getElementById("mpp_file");
-    var fname = document.getElementById("fname");
-    if (!drop || !input || !fname) return;
-
-    function show() {
-      if (input.files && input.files.length) {
-        fname.textContent = input.files[0].name;
-        drop.classList.add("hasfile");
-      } else {
-        fname.textContent = "";
-        drop.classList.remove("hasfile");
-      }
-    }
-
-    // Contrôle de taille côté navigateur : message immédiat. Le serveur refuse
-    // de toute façon le fichier, ceci évite seulement d'attendre l'envoi.
-    input.addEventListener("change", function () {
-      var limite = Number(drop.dataset.maxMb || 5) * 1024 * 1024;
-      var note = document.getElementById("taille-note");
-      if (input.files && input.files.length && note) {
-        var mo = (input.files[0].size / 1024 / 1024).toFixed(1);
-        note.textContent = input.files[0].size > limite
-          ? "Fichier de " + mo + " Mo : au-delà de la limite de "
-            + drop.dataset.maxMb + " Mo, l'envoi sera refusé."
-          : input.files[0].name + " (" + mo + " Mo)";
-        note.hidden = false;
-      }
-    });
-    input.addEventListener("change", show);
-    ["dragover", "dragenter"].forEach(function (e) {
-      drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.add("drag"); });
-    });
-    ["dragleave", "drop"].forEach(function (e) {
-      drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.remove("drag"); });
-    });
-    drop.addEventListener("drop", function (ev) {
-      if (ev.dataTransfer && ev.dataTransfer.files.length) {
-        input.files = ev.dataTransfer.files;
-        show();
-      }
-    });
-  })();
-</script>
-
-{# Page d'attente : temps écoulé et arrêt de l'analyse. Le formulaire part
-   normalement (aucune requête parallèle n'est nécessaire pour l'analyse
-   elle-même) ; le bouton d'arrêt signale seulement l'annulation au serveur.
-   Sans JavaScript, rien de tout ceci n'est affiché. #}
+{# Confort uniquement : nom du fichier choisi, récapitulatif du panneau de
+   droite et page d'attente. Le formulaire reste entièrement fonctionnel sans
+   JavaScript (l'input natif couvre la zone de dépôt). #}
 <script>
   (function () {
     var form = document.getElementById("analyse-form");
+    var drop = document.getElementById("drop");
+    var input = document.getElementById("mpp_file");
+    var chip = document.getElementById("dz-file");
+    var chipLabel = document.getElementById("dz-file-label");
+    var ctaFile = document.getElementById("cta-file");
+    var ctaMode = document.getElementById("cta-mode");
+    var ctaOpts = document.getElementById("cta-opts");
+    if (!form || !input) return;
+
+    var MODES = {
+      dcma: "Diagnostic DCMA-14",
+      montecarlo: "Simulation Monte Carlo",
+      both: "Diagnostic DCMA-14 + Monte Carlo"
+    };
+
+    function taille(octets) {
+      return (octets / 1024 / 1024).toFixed(1).replace(".", ",") + " Mo";
+    }
+
+    function showFile() {
+      var max = Number((drop && drop.dataset.maxMb) || 20) * 1024 * 1024;
+      var fichier = input.files && input.files.length ? input.files[0] : null;
+      if (!fichier) {
+        if (chip) chip.hidden = true;
+        if (ctaFile) ctaFile.textContent = "Aucun planning choisi";
+        return;
+      }
+      var trop = fichier.size > max;
+      if (chipLabel) {
+        chipLabel.textContent = trop
+          ? fichier.name + " · " + taille(fichier.size) + " : au-delà de "
+            + (drop.dataset.maxMb || 20) + " Mo, l’envoi sera refusé"
+          : fichier.name + " · " + taille(fichier.size);
+      }
+      if (chip) {
+        chip.hidden = false;
+        chip.style.borderColor = trop ? "var(--ko-border)" : "var(--ok-border)";
+        chip.style.color = trop ? "var(--ko)" : "var(--ok)";
+      }
+      if (ctaFile) ctaFile.textContent = fichier.name;
+    }
+
+    function showOptions() {
+      var coche = form.querySelector('input[name="analysis"]:checked');
+      if (ctaMode) ctaMode.textContent = MODES[coche ? coche.value : "both"] || MODES.both;
+      var sims = document.getElementById("sims");
+      var exports = [].slice.call(form.querySelectorAll('input[name="export"]:checked'))
+        .map(function (c) { return c.value === "xlsx" ? "Excel" : "CSV"; });
+      var parties = [];
+      if (coche && coche.value !== "dcma" && sims) {
+        parties.push(sims.options[sims.selectedIndex].text.split(" (")[0] + " simulations");
+      }
+      parties.push(exports.length ? "export " + exports.join(" + ") : "aucun export");
+      if (ctaOpts) ctaOpts.textContent = parties.join(" · ");
+    }
+
+    input.addEventListener("change", showFile);
+    form.addEventListener("change", showOptions);
+    showOptions();
+
+    // Page d'attente : temps écoulé et arrêt de l'analyse. Le formulaire part
+    // normalement (aucune requête parallèle n'est nécessaire pour l'analyse
+    // elle-même) ; le bouton d'arrêt signale seulement l'annulation au serveur.
     var waiting = document.getElementById("waiting");
     var timeEl = document.getElementById("waiting-time");
     var stepsEl = document.getElementById("waiting-steps");
@@ -224,34 +264,30 @@
     var cancelBtn = document.getElementById("cancel-btn");
     var cancelState = document.getElementById("cancel-state");
     var tokenInput = document.getElementById("client_token");
-    if (!form || !waiting) return;
+    if (!waiting) return;
 
     var timer = null;
     var started = 0;
     var stopped = false;
 
-    function plannedSteps() {
-      var checked = form.querySelector('input[name="analysis"]:checked');
-      var mode = checked ? checked.value : "dcma";
-      var steps = [];
-      if (mode === "dcma" || mode === "both") steps.push("Diagnostic qualité DCMA-14");
-      if (mode === "montecarlo" || mode === "both") steps.push("Simulation Monte Carlo");
-      return steps;
-    }
-
     form.addEventListener("submit", function () {
       waiting.hidden = false;
       started = Date.now();
-      plannedSteps().forEach(function (label) {
+      var coche = form.querySelector('input[name="analysis"]:checked');
+      var mode = coche ? coche.value : "both";
+      var etapes = [];
+      if (mode === "dcma" || mode === "both") etapes.push("Diagnostic qualité DCMA-14");
+      if (mode === "montecarlo" || mode === "both") etapes.push("Simulation Monte Carlo");
+      etapes.forEach(function (label) {
         var line = document.createElement("div");
         line.className = "overlay-step";
         line.textContent = "• " + label;
         stepsEl.appendChild(line);
       });
       timer = window.setInterval(function () {
-        var seconds = Math.round((Date.now() - started) / 1000);
-        timeEl.textContent = "Temps écoulé : " + seconds + " s";
-        if (seconds >= 60) slowEl.hidden = false;
+        var secondes = Math.round((Date.now() - started) / 1000);
+        timeEl.textContent = "Temps écoulé : " + secondes + " s";
+        if (secondes >= 60) slowEl.hidden = false;
       }, 500);
     });
 

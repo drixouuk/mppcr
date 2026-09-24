@@ -3,6 +3,55 @@
 Les versions antérieures à la v1.6.0 sont documentées dans les
 [releases GitHub](https://github.com/drixouuk/mppcr/releases).
 
+## v1.13.0
+
+### Modifié
+- **Interface reprise intégralement d'après la maquette v2**
+  (`mppcr-redesign.html`) : sa feuille de style est reprise **verbatim** dans
+  `templates/base.html`, complétée par un second bloc qui ne contient que les
+  ajouts imposés par le rendu serveur (affichage de la vue unique de la page,
+  bandes du score, page d'attente, styles d'impression).
+  - en-tête : marque, version de l'application, fil d'étapes
+    « 1 Nouvelle analyse › 2 Diagnostic DCMA-14 › 3 Monte Carlo » ;
+  - formulaire : trois étapes numérotées (fichier, analyse, options), zone de
+    dépôt, panneau d'appel à l'action collant avec récapitulatif vivant et quota
+    du jour ;
+  - résultat : héros de score (bande, barre, repères 55/70/85, formule), cinq
+    cartes KPI, bandeaux d'alerte, sous-navigation DCMA / Monte Carlo, priorités
+    en volets dépliables (action + numéros de tâches en pastilles), tableau des
+    contrôles à cinq colonnes, cartes P50/P80/P90, axe des percentiles,
+    indice de criticité par tâche.
+- Le tableau « Détail des contrôles » **perd la colonne « Tâches concernées »** :
+  la maquette v2 place ces numéros dans les priorités correspondantes, sous
+  forme de pastilles. Les exports CSV et Excel conservent la colonne complète,
+  sans troncature.
+- Options Monte Carlo : le nombre de simulations et les facteurs PERT passent en
+  **listes déroulantes** (1 000 / 5 000 / 10 000 et « 0,8 / 1,5 » / « 0,7 / 1,8 »).
+  Le script continue de recevoir `--opt` / `--pess`, et le serveur accepte
+  toujours les champs `opt` et `pess` séparés pour les appels directs.
+- Date d'état affichée au format français (`05/10/2026 08:00`) au lieu de la
+  valeur ISO du fichier, et écarts Monte Carlo (lecture décisionnelle,
+  incertitude P50 → P90) écrits avec la virgule décimale — y compris dans les
+  exports CSV et Excel.
+- Le volet « Comment ce score est calculé » nomme les contrôles hors barème au
+  pluriel (10 et 12), au lieu d'une phrase au singulier.
+
+### Ajouté
+- `LICENSE` : **GPL-3.0** (déposée sur GitHub, synchronisée dans le dépôt) et
+  section « Licence » du README.
+
+### Vérifié
+- Harnais fonctionnel : **293 vérifications** (dont l'exécution réelle des deux
+  scripts). Contrôles d'alignement sur la maquette v2 : **188 vérifications**,
+  dont la comparaison caractère par caractère de la feuille de style
+  (21 833 octets identiques) et l'absence de tout contenu de démonstration.
+- Effet des options du formulaire, mesuré sur le plan témoin (7 tâches,
+  5 000 simulations) :
+  - facteurs 0,8 / 1,5 → P50 **48,6 j**, P90 52,8 j ;
+  - facteurs 0,7 / 1,8 → P50 **49,8 j**, P90 56,2 j ;
+  - estimation 3 points explicite du lot Développement (1 j au lieu de 20 j) →
+    déterministe 47,0 j → **28,0 j**, P50 28,8 j.
+
 ## v1.12.0
 
 ### Ajouté

@@ -456,11 +456,12 @@ DCMA_PRIORITY = {
     3: 9, 5: 10, 2: 11, 13: 12, 10: 13, 12: 14,
 }
 
+# Pastilles de verdict de la page de résultat (classes CSS de la maquette v2).
 KIND_CSS = {
-    "ok": "badge-ok",
-    "ko": "badge-ko",
-    "info": "badge-info",
-    "na": "badge-na",
+    "ok": "b-ok",
+    "ko": "b-ko",
+    "info": "b-info",
+    "na": "b-na",
 }
 
 # Intitulés des 14 contrôles tels qu'affichés : le script dcma14.py les renvoie
@@ -494,10 +495,10 @@ SCORE_EXCLUDED = {10, 12}
 SCORE_CAP_ONE_MISSING = 75
 SCORE_CAP_TWO_MISSING = 60
 SCORE_BANDS = (
-    (85, "Conforme", "b-ok", "cf-low"),
-    (70, "Acceptable", "b-info", "cf-low"),
-    (55, "Fragile", "b-warn", "cf-med"),
-    (0, "Insuffisant", "b-err", "cf-high"),
+    (85, "Conforme", "b-ok", "bd-ok"),
+    (70, "Acceptable", "b-info", "bd-mid"),
+    (55, "Fragile", "b-warn", "bd-warn"),
+    (0, "Insuffisant", "b-ko", "bd-ko"),
 )
 
 MC_LABELS = {
@@ -526,6 +527,32 @@ def first_float(text):
 def first_int(text):
     value = first_float(text)
     return int(value) if value is not None else None
+
+
+def nombre_fr(valeur, decimales=1):
+    """Nombre décimal au format français (virgule), pour l'affichage et les exports."""
+    return f"{valeur:.{decimales}f}".replace(".", ",")
+
+
+def signe_fr(valeur, decimales=1):
+    """Écart signé au format français (« +4,0 » / « -1,5 »)."""
+    return ("+" if valeur >= 0 else "") + nombre_fr(valeur, decimales)
+
+
+def date_etat_fr(texte):
+    """Valeur de la ligne « Date d'état du projet », au format français.
+
+    dcma14.py renvoie la date ISO du fichier (« 2026-10-05T08:00 ») : la page de
+    résultat l'affiche comme MS Project, en français ; tout autre texte (dont la
+    mention « NON RENSEIGNEE ») est rendu tel quel.
+    """
+    brut = (texte or "").strip()
+    valeur = brut.split(":", 1)[1].strip() if ":" in brut else brut
+    correspondance = re.match(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})", valeur)
+    if not correspondance:
+        return valeur
+    annee, mois, jour, heure, minute = correspondance.groups()
+    return f"{jour}/{mois}/{annee} {heure}:{minute}"
 
 
 def split_ratio(detail):
@@ -771,7 +798,7 @@ def dcma_score(parsed):
     base = round(100 * len(conformes) / len(evaluated)) if evaluated else None
     score = min(base, cap) if base is not None else None
 
-    label, badge_css, band_css = "Non évaluable", "b-na", "cf-med"
+    label, badge_css, band_css = "Non évaluable", "b-na", "bd-warn"
     if score is not None:
         for seuil, texte, badge, bande in SCORE_BANDS:
             if score >= seuil:
@@ -903,6 +930,7 @@ def parse_dcma_output(text):
                     )
 
     parsed["task_details"] = parse_task_details(text)
+    parsed["status_date"] = date_etat_fr(parsed["status"])
     finalize_dcma(parsed)
     return parsed
 
@@ -1052,8 +1080,8 @@ def enrich_montecarlo(parsed):
         parsed["kpi"].append(
             {
                 "label": "Incertitude P50 → P90",
-                "value": f"{spread:.1f} j",
-                "sub": f"{spread_pct:.1f} % du P50 — incertitude {level}",
+                "value": f"{nombre_fr(spread)} j",
+                "sub": f"{nombre_fr(spread_pct)} % du P50 — incertitude {level}",
                 "target": "Repère : < 25 %",
                 "css": css,
             }
@@ -1061,19 +1089,19 @@ def enrich_montecarlo(parsed):
 
     if det is not None and p80 is not None:
         contingency = p80 - det
-        decision = f"Pour un objectif de planning à 80 % de confiance, viser {p80:.1f} j"
+        decision = f"Pour un objectif de planning à 80 % de confiance, viser {nombre_fr(p80)} j"
         if contingency > 0:
             decision += (
-                f", soit {contingency:.1f} j de contingence par rapport à la durée déterministe "
-                f"({det:.1f} j)."
+                f", soit {nombre_fr(contingency)} j de contingence par rapport à la durée "
+                f"déterministe ({nombre_fr(det)} j)."
             )
         else:
             decision += "."
 
         if p90 is not None:
             decision += (
-                f" Pour un engagement prudent à 90 %, viser {p90:.1f} j "
-                f"({p90 - det:+.1f} j vs CPM)."
+                f" Pour un engagement prudent à 90 %, viser {nombre_fr(p90)} j "
+                f"({signe_fr(p90 - det)} j vs CPM)."
             )
 
         parsed["decision"] = decision
@@ -1252,9 +1280,22 @@ def parse_montecarlo_output(text):
 
 
 def parse_montecarlo_options(form):
+    """Options Monte Carlo lues dans le formulaire.
+
+    Le formulaire propose un choix unique de facteurs PERT (« 0,8 / 1,5 ») :
+    les champs séparés `opt` et `pess` restent acceptés et prioritaires, pour
+    les appels directs et les tests.
+    """
     sims_raw = (form.get("sims") or "5000").strip() or "5000"
-    opt_raw = (form.get("opt") or "0.8").strip().replace(",", ".") or "0.8"
-    pess_raw = (form.get("pess") or "1.5").strip().replace(",", ".") or "1.5"
+
+    facteurs = (form.get("factors") or "").strip().replace(" ", "").replace(",", ".")
+    if "/" in facteurs:
+        opt_defaut, _, pess_defaut = facteurs.partition("/")
+    else:
+        opt_defaut, pess_defaut = "0.8", "1.5"
+
+    opt_raw = (form.get("opt") or "").strip().replace(",", ".") or (opt_defaut or "0.8")
+    pess_raw = (form.get("pess") or "").strip().replace(",", ".") or (pess_defaut or "1.5")
 
     try:
         sims = int(float(sims_raw))
@@ -1407,6 +1448,7 @@ def build_downloads(exports, results, filename):
         libelle, mimetype, extension = EXPORT_FORMATS[fmt]
         downloads.append(
             {
+                "fmt": fmt,
                 "label": libelle,
                 "filename": f"{base}.{extension}",
                 "size": len(payload),

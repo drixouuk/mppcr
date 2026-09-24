@@ -2,353 +2,314 @@
 
 {% block title %}{{ filename }} — MPPCR{% endblock %}
 
-{# Barre de navigation de la maquette, sans JavaScript : chaque résultat obtenu
-   est une ancre vers sa section, et un résultat non demandé dans cette requête
-   reste affiché mais inerte. L'onglet de gauche ramène au formulaire — c'est un
-   abandon du résultat affiché, donc il est libellé explicitement « Nouvelle
-   analyse » ici (et non « Formulaire ») et confirmé en JavaScript quand le
-   navigateur l'exécute. #}
-{% block tabs %}
-  {% set kinds = results|map(attribute='kind')|list %}
-  <a class="tab" id="tab-form" href="{{ url_for('index') }}"
-     title="Quitter ce résultat : l’analyse devra être relancée pour être réaffichée"><span class="n">①</span> Nouvelle analyse</a>
-  {% if 'dcma' in kinds %}
-    <a class="tab" href="#dcma"{% if kinds[0] == 'dcma' %} aria-current="location"{% endif %}><span class="n">②</span> Résultat DCMA-14</a>
+{# Analyse demandée dans cette requête : le diagnostic DCMA-14 et la simulation
+   Monte Carlo sont deux sections d'une même page (la maquette les réunit, avec
+   une sous-navigation par ancres). Une analyse non demandée n'est ni affichée
+   ni simulée : son étape reste inerte dans l'en-tête. #}
+{% set kinds = results|map(attribute='kind')|list %}
+{% set has_dcma = 'dcma' in kinds %}
+{% set has_mc = 'montecarlo' in kinds %}
+{% set dcma_list = results|selectattr('kind', 'equalto', 'dcma')|list %}
+{% set mc_list = results|selectattr('kind', 'equalto', 'montecarlo')|list %}
+{% set dcma = dcma_list[0].parsed if dcma_list else None %}
+{% set mc = mc_list[0].parsed if mc_list else None %}
+
+{# Garde-fou : un clic accidentel sur « Nouvelle analyse » ferait perdre le
+   résultat affiché (il naît d'un POST, il n'est conservé nulle part). Tous les
+   liens marqués data-quit sont concernés, la confirmation restant progressive :
+   sans JavaScript ils fonctionnent normalement. #}
+{% block brand_guard %} data-quit{% endblock %}
+
+{% block stepper %}
+  <a class="step" href="{{ url_for('index') }}" data-quit title="Quitter ce résultat : l’analyse devra être relancée pour être réaffichée"><span class="n">1</span><span class="s-lab">Nouvelle analyse</span></a>
+  <span class="step-sep">&rsaquo;</span>
+  {% if has_dcma %}
+    <a class="step active" aria-current="true" href="#diag"><span class="n">2</span><span class="s-lab">Diagnostic DCMA-14</span></a>
   {% else %}
-    <span class="tab is-off" aria-disabled="true" title="Aucun diagnostic DCMA-14 dans cette analyse"><span class="n">②</span> Résultat DCMA-14</span>
+    <span class="step" title="Aucun diagnostic DCMA-14 dans cette analyse"><span class="n">2</span><span class="s-lab">Diagnostic DCMA-14</span></span>
   {% endif %}
-  {% if 'montecarlo' in kinds %}
-    <a class="tab" href="#montecarlo"{% if kinds[0] == 'montecarlo' %} aria-current="location"{% endif %}><span class="n">③</span> Résultat Monte Carlo</a>
+  <span class="step-sep">&rsaquo;</span>
+  {% if has_mc %}
+    <a class="step{{ ' done' if has_dcma else ' active' }}"{% if not has_dcma %} aria-current="true"{% endif %} href="#mc"><span class="n">3</span><span class="s-lab">Monte Carlo</span></a>
   {% else %}
-    <span class="tab is-off" aria-disabled="true" title="Aucune simulation Monte Carlo dans cette analyse"><span class="n">③</span> Résultat Monte Carlo</span>
+    <span class="step" title="Aucune simulation Monte Carlo dans cette analyse"><span class="n">3</span><span class="s-lab">Monte Carlo</span></span>
   {% endif %}
 {% endblock %}
 
 {% block content %}
-{# Correspondance entre les classes produites par app.py et la maquette. #}
-{% set badge_of = {'badge-ok': 'b-ok', 'badge-ko': 'b-err', 'badge-info': 'b-info', 'badge-na': 'b-na'} %}
-{% set stamp_of = {'status-ok': 'b-ok', 'status-ko': 'b-err', 'status-na': 'b-na'} %}
-{% set cf_of = {'high': 'cf-high', 'medium': 'cf-med', 'low': 'cf-low'} %}
-{% set cv_of = {'high': 'cv-high', 'medium': 'cv-med', 'low': 'cv-low'} %}
-{# Libellés fournis par app.py (source unique, partagée avec les exports CSV/Excel). #}
-{% set label_of = verdicts|default({'ok': 'OK', 'ko': 'À corriger', 'info': 'Info', 'na': 'N/A'}, true) %}
+{# Classes de la maquette v2 choisies selon le verdict (app.py, KIND_CSS). #}
+{% set rank_of = {'ko': 'pr-ko', 'na': 'pr-na', 'info': 'pr-warn'} %}
+{% set fmt_of = {'csv': 'CSV', 'xlsx': 'Excel'} %}
+{% set dl = downloads|default([], true) %}
+{% set exports_ok = dl|map(attribute='fmt')|list %}
+{# Libellés fournis par app.py (source unique, partagée avec les exports). #}
 {% set names = labels|default({}, true) %}
-{# Résultat Monte Carlo de la même page, s'il existe : sert à afficher la
-   contingence et la dispersion à côté du score de conformité. #}
-{% set mc_list = results|selectattr('kind', 'equalto', 'montecarlo')|list %}
-{% set mc_parsed = mc_list[0].parsed if mc_list else None %}
-{% set mcinfo = namespace(det=None, p80=None, disp=None) %}
-{% if mc_parsed %}
-  {% for m in mc_parsed.metrics %}
-    {% if m.key == 'deterministic' %}{% set mcinfo.det = m.value_num %}{% endif %}
-    {% if m.key == 'p80' %}{% set mcinfo.p80 = m.value_num %}{% endif %}
-  {% endfor %}
-  {% for k in mc_parsed.kpi %}
-    {% if k.label.startswith('Incertitude') %}{% set mcinfo.disp = k %}{% endif %}
-  {% endfor %}
-{% endif %}
+{% set verdict_label = verdicts|default({'ok': 'OK', 'ko': 'À corriger', 'info': 'Info', 'na': 'N/A'}, true) %}
 
-{% if downloads %}
-{# Fichiers demandés au dépôt du formulaire : encodés dans la page (data:),
-   aucun stockage côté serveur, téléchargement sans JavaScript. #}
-<div class="card no-print">
-  <div class="card-head">
-    <h2>Exports disponibles</h2>
-    <span class="meta">{{ downloads|length }} fichier{{ 's' if downloads|length > 1 else '' }}</span>
-  </div>
-  <div class="card-pad">
-    <div class="hint">Générés à partir de cette analyse, téléchargeables directement depuis cette page.</div>
-    <div class="chip-row">
-      {% for d in downloads %}
-        <a class="btn" download="{{ d.filename }}" href="{{ d.href }}">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
-          {{ d.label }} · {{ (d.size / 1024)|round(1)|replace('.', ',') }} Ko
-        </a>
-      {% endfor %}
-    </div>
-    <div class="hint">Pour un PDF, ouvrez l’impression du navigateur depuis cette page.</div>
-  </div>
-</div>
-{% endif %}
+<section class="view" id="view-result">
+  <div class="container">
 
-<section class="view">
-{% for result in results %}
-  {% set p = result.parsed %}
-  <div class="result" id="{{ 'dcma' if result.kind == 'dcma' else 'montecarlo' }}">
-
-  {% if result.kind == 'dcma' %}
-  {# ===================== RÉSULTAT DCMA-14 ===================== #}
-  <div class="result-top">
-    <div class="page-head mb-0">
-      <h1>Diagnostic qualité DCMA-14</h1>
-      <div class="chip-row">
-        <span class="file-chip">
-          <svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
-          {{ filename }}
-        </span>
-        {% if p.status and 'NON RENSEIGNEE' not in p.status|upper %}
-          <span class="meta">{{ p.status|replace("d'etat du projet", 'd’état du projet') }}</span>
-        {% endif %}
-      </div>
-    </div>
-    {% if p.status_label %}
-      <span class="badge {{ stamp_of.get(p.status_css, 'b-na') }} badge-lg"><span class="dot"></span> {{ p.status_label }}</span>
-    {% endif %}
-  </div>
-
-  {% if p.rows %}
-    {% if p.status and 'NON RENSEIGNEE' in p.status|upper %}
-      <div class="callout c-warn">
-        <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
-        <div><b>Date d’état du projet non renseignée</b> — plusieurs contrôles seront N/A. Renseignez-la pour activer les contrôles 9, 11 et 14.</div>
-      </div>
-    {% endif %}
-
-    <div class="kpis">
-      <div class="kpi kpi-total"><div class="kl">Contrôles</div><div class="kv">{{ p.kpi.total }}</div></div>
-      <div class="kpi kpi-ok"><div class="kl">Conformes</div><div class="kv">{{ p.kpi.ok }}</div></div>
-      <div class="kpi kpi-err"><div class="kl">À corriger</div><div class="kv">{{ p.kpi.ko }}</div></div>
-      <div class="kpi kpi-na"><div class="kl">N/A</div><div class="kv">{{ p.kpi.na }}</div></div>
-      <div class="kpi kpi-info"><div class="kl">Info</div><div class="kv">{{ p.kpi.info }}</div></div>
-    </div>
-
-    {% set blocking = p.rows|selectattr('num', 'equalto', 1)|selectattr('kind', 'equalto', 'ko')|list %}
-    {% set s = p.score %}
-
-    <div class="card card-pad score">
-      <div class="score-head">
-        <div class="score-value">
-          {%- if s.score is not none %}{{ s.score }}<small>/100</small>{% else %}—<small>/100</small>{% endif -%}
-        </div>
-        <div class="score-body">
-          <div class="score-title">
-            Score de conformité DCMA
-            <span class="badge {{ s.badge_css }}"><span class="dot"></span> {{ s.label }}</span>
-          </div>
-          <div class="score-meta">
-            {{ s.conformes }} conforme{{ 's' if s.conformes > 1 else '' }} sur {{ s.evaluated }} contrôle{{ 's' if s.evaluated > 1 else '' }} évalué{{ 's' if s.evaluated > 1 else '' }}
-            · {{ s.na }} non évaluable{{ 's' if s.na > 1 else '' }}
-            · barème {{ s.version }}
-          </div>
-          {% if s.capped %}
-            <div class="score-meta">
-              Plafonné à {{ s.cap }} : {{ s.missing|join(' et ') }} non renseigné{{ 'e' if s.missing|length > 1 else '' }}
-              ({{ s.base }}/100 avant plafond)
-            </div>
+    {# ---------------- En-tête du résultat ---------------- #}
+    <div class="result-head">
+      <div>
+        <a class="back-link" href="{{ url_for('index') }}" data-quit>‹ Nouvelle analyse</a>
+        <div>
+          <span class="file-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            {% if '.' in filename %}<span class="ext">.{{ filename.rsplit('.', 1)[1] }}</span> {{ filename.rsplit('.', 1)[0] }}{% else %}{{ filename }}{% endif %}
+          </span>
+          {% if dcma and dcma.status and 'NON RENSEIGNEE' not in dcma.status|upper %}
+            <span class="meta-chip" style="margin-left:8px">Date d’état : <b>{{ dcma.status_date or dcma.status }}</b></span>
           {% endif %}
-          {% if mcinfo.p80 is not none and mcinfo.det is not none %}
-            <div class="score-meta">
-              Risque (Monte Carlo) : contingence P80 vs CPM
-              {{ '%+.1f'|format(mcinfo.p80 - mcinfo.det)|replace('.', ',') }} j
-              {%- if mcinfo.disp %} · dispersion P50 → P90 {{ mcinfo.disp.value }} ({{ mcinfo.disp.sub }}){% endif %}
-            </div>
+        </div>
+        <div class="meta-chips">
+          {% if dcma and dcma.rows %}
+            <span class="meta-chip"><b>{{ dcma.kpi.total }}</b> contrôles DCMA-14</span>
+          {% endif %}
+          {% if mc and mc.info.tasks %}
+            <span class="meta-chip"><b>{{ mc.info.tasks }}</b> tâches de détail</span>
+          {% endif %}
+          {% if mc and mc.info.links %}
+            <span class="meta-chip"><b>{{ mc.info.links }}</b> liens de dépendance</span>
+          {% endif %}
+          {% if mc and mc.info.sims %}
+            <span class="meta-chip"><b>{{ mc.info.sims }}</b> simulations</span>
+          {% endif %}
+          {% if dcma and dcma.score %}
+            <span class="meta-chip">Barème <b>{{ dcma.score.version }}</b></span>
           {% endif %}
         </div>
       </div>
+      <div class="head-actions">
+        {% for d in dl %}
+          <a class="btn btn-ghost btn-sm" href="{{ d.href }}" download="{{ d.filename }}"
+             title="{{ d.filename }} · {{ (d.size / 1024)|round(1)|replace('.', ',') }} Ko">
+            {% if d.fmt == 'csv' %}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            {% else %}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            {% endif %}
+            {{ fmt_of.get(d.fmt, d.label) }}
+          </a>
+        {% endfor %}
+        {% for fmt in ['csv', 'xlsx'] if fmt not in exports_ok %}
+          <span class="btn btn-ghost btn-sm" title="Cochez « {{ fmt_of[fmt] }} » dans le formulaire pour obtenir ce fichier avec l’analyse">
+            {% if fmt == 'csv' %}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            {% else %}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            {% endif %}
+            {{ fmt_of[fmt] }}
+          </span>
+        {% endfor %}
+        <button class="btn btn-ghost btn-sm" type="button" id="print-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer / PDF
+        </button>
+      </div>
+    </div>
 
-      <div class="score-track">
-        <div class="score-fill {{ s.band_css }}" style="width: {{ s.score or 0 }}%"></div>
+    {% if dcma %}{% set p = dcma %}{% set s = dcma.score %}
+    {# ==================== DIAGNOSTIC DCMA-14 ==================== #}
+    {% if p.rows and s %}
+      <!-- Score hero -->
+      <div class="card score-hero">
+        <div class="score-hero-inner">
+          <div class="score-left {{ s.band_css }}">
+            <div class="k-label">Score de conformité DCMA</div>
+            <div class="score-num">{% if s.score is not none %}{{ s.score }}{% else %}—{% endif %}<span>/100</span></div>
+            <span class="band-badge {{ s.band_css }}"><span class="bdot"></span>{{ s.label }}</span>
+          </div>
+          <div class="score-right">
+            <h3>
+              {%- if s.evaluated -%}
+                {{ s.conformes }} conforme{{ 's' if s.conformes > 1 else '' }} sur {{ s.evaluated }} contrôle{{ 's' if s.evaluated > 1 else '' }} évalué{{ 's' if s.evaluated > 1 else '' }} · {{ s.na }} non évaluable{{ 's' if s.na > 1 else '' }}
+              {%- else -%}
+                Aucun contrôle évaluable dans ce planning
+              {%- endif -%}
+            </h3>
+            <div class="score-bar-wrap">
+              <div class="score-bar"><div class="score-fill {{ s.band_css }}" style="width:{{ s.score or 0 }}%"></div></div>
+              <div class="score-ticks">
+                <span class="tick" style="left:55%">55</span>
+                <span class="tick" style="left:70%">70</span>
+                <span class="tick" style="left:85%">85</span>
+              </div>
+            </div>
+            <div class="legend">
+              <span class="li"><span class="lg" style="background:#F04438"></span>&lt; 55 insuffisant</span>
+              <span class="li"><span class="lg" style="background:#F79009"></span>55–69 fragile</span>
+              <span class="li"><span class="lg" style="background:#84CC16"></span>70–84 acceptable</span>
+              <span class="li"><span class="lg" style="background:#12B76A"></span>≥ 85 conforme</span>
+            </div>
+            <p class="score-formula">
+              {%- if s.capped -%}
+                Plafonné à {{ s.cap }} : {{ s.missing|join(' et ') }} manquante{{ 's' if s.missing|length > 1 else '' }} ({{ s.base }}/100 avant plafond).
+              {%- elif s.score is not none -%}
+                Seuls les contrôles évaluables sont notés, à poids égal (barème {{ s.version }}).
+              {%- else -%}
+                Aucun contrôle conforme ou en écart : le score n’est pas calculable.
+              {%- endif %}
+              <a href="#methode-score" style="color:var(--primary);font-weight:600;text-decoration:none">Comment ce score est calculé ↗</a>
+            </p>
+          </div>
+        </div>
       </div>
 
-      <details class="adv">
-        <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Comment ce score est calculé (barème {{ s.version }})</summary>
-        <div class="adv-body">
-          <div class="hint">
-            <b>Périmètre.</b> Seuls les contrôles évaluables sont notés. Le contrôle
-            {{ s.excluded|join(' et le ') }} est hors barème : le 12 est une vérification manuelle qui n’est
-            jamais mesurable ici, le 10 un indicateur sans seuil. Un contrôle N/A
-            faute de données ne compte ni comme conforme ni comme faute.
-          </div>
-          <div class="hint">
-            <b>Calcul.</b> Tous les contrôles notés pèsent le même poids :
-            score = 100 × contrôles conformes ÷ contrôles évalués, arrondi à l’entier.
-          </div>
-          <div class="hint">
-            <b>Plafond de complétude.</b> 75 si la date d’état du projet ou la baseline
-            manque, 60 si les deux manquent. Sans ce plafond, un planning vide
-            obtiendrait 100/100 faute de contrôle mesurable.
-          </div>
-          <div class="hint">
-            <b>Bandes.</b> 85 et plus : conforme · 70 à 84 : acceptable · 55 à 69 : fragile ·
-            moins de 55 : insuffisant.
-          </div>
-          <div class="hint">
-            <b>Nature.</b> La méthode DCMA-14 ne définit aucun score composite : celui-ci
-            est une convention MPPCR, versionnée ({{ s.version }}) pour rester comparable
-            d’une analyse à l’autre.
-          </div>
+      <details class="opt" id="methode-score">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          Comment ce score est calculé (barème {{ s.version }})
+          <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="opt-body">
+          <p class="small muted" style="margin-top:10px"><b>Périmètre.</b> Seuls les contrôles évaluables sont notés. Les contrôles {{ s.excluded|join(' et ') }} sont hors barème : le 12 est une vérification manuelle qui n’est jamais mesurable ici, le 10 un indicateur sans seuil. Un contrôle N/A faute de données ne compte ni comme conforme ni comme faute.</p>
+          <p class="small muted"><b>Calcul.</b> Tous les contrôles notés pèsent le même poids : score = 100 × contrôles conformes ÷ contrôles évalués, arrondi à l’entier.</p>
+          <p class="small muted"><b>Plafond de complétude.</b> 75 si la date d’état du projet ou la baseline manque, 60 si les deux manquent. Sans ce plafond, un planning vide obtiendrait 100/100 faute de contrôle mesurable.</p>
+          <p class="small muted"><b>Bandes.</b> 85 et plus : conforme · 70 à 84 : acceptable · 55 à 69 : fragile · moins de 55 : insuffisant.</p>
+          <p class="small muted"><b>Nature.</b> La méthode DCMA-14 ne définit aucun score composite : celui-ci est une convention MPPCR, versionnée ({{ s.version }}) pour rester comparable d’une analyse à l’autre.</p>
         </div>
       </details>
-    </div>
 
-    {% if p.overall_comment %}
-      <div class="callout {{ 'c-err' if blocking else 'c-info' }}">
-        {% if blocking %}
-          <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
-        {% else %}
-          <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
-        {% endif %}
-        <div>{{ p.overall_comment }}</div>
+      <!-- KPI strip -->
+      <div class="kpis">
+        <div class="kpi"><div class="k-label">Contrôles</div><div class="k-val">{{ p.kpi.total }}</div><div class="k-sub">référentiel DCMA</div></div>
+        <div class="kpi k-ok"><div class="k-label">Conformes</div><div class="k-val" style="color:var(--ok)">{{ p.kpi.ok }}</div><div class="k-sub">cibles atteintes</div></div>
+        <div class="kpi k-ko"><div class="k-label">À corriger</div><div class="k-val" style="color:var(--ko)">{{ p.kpi.ko }}</div><div class="k-sub">prioritaires</div></div>
+        <div class="kpi k-na"><div class="k-label">N/A</div><div class="k-val" style="color:var(--na)">{{ p.kpi.na }}</div><div class="k-sub">données manquantes</div></div>
+        <div class="kpi k-info"><div class="k-label">Info</div><div class="k-val" style="color:var(--primary)">{{ p.kpi.info }}</div><div class="k-sub">indicateur</div></div>
       </div>
     {% endif %}
 
-    {% if p.priorities %}
-      <div class="card">
-        <div class="card-head">
-          <h2>Priorités d’amélioration</h2>
-          <span class="meta">{{ p.priorities|length }} action{{ 's' if p.priorities|length > 1 else '' }}</span>
+    {% set bloquant = p.rows|selectattr('num', 'equalto', 1)|selectattr('kind', 'equalto', 'ko')|list %}
+    {% if p.overall_comment %}
+      {% if bloquant %}
+        <div class="alert alert-danger">
+          <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>{{ p.overall_comment }}</span>
+          <a class="alert-action" href="#diag">Voir le contrôle 1</a>
         </div>
-        <div class="card-pad prio">
-          {% for item in p.priorities %}
-            <div class="prio-item">
-              <div class="prio-num {{ 'pn-err' if item.kind == 'ko' else 'pn-na' }}">{{ '%02d'|format(loop.index) }}</div>
-              <div class="prio-body">
-                <div class="prio-title">
-                  {{ names.get(item.num, item.name) }}
-                  <span class="badge {{ badge_of.get(item.css, 'b-na') }}">{{ label_of.get(item.kind, item.verdict) }}</span>
-                </div>
-                <div class="prio-metric">
+      {% else %}
+        <div class="alert alert-info">
+          <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span>{{ p.overall_comment }}</span>
+        </div>
+      {% endif %}
+    {% endif %}
+
+    <!-- Sub-nav résultats -->
+    {% if has_mc %}
+      <div class="subnav">
+        <a href="#diag" class="active">Diagnostic DCMA-14</a>
+        <a href="#mc">Monte Carlo</a>
+      </div>
+    {% endif %}
+
+    {% if p.rows %}
+      <!-- Priorités -->
+      {% if p.priorities %}
+        <div class="sec-title" id="diag"><h2>Priorités d’amélioration</h2><span class="count">{{ p.priorities|length }} action{{ 's' if p.priorities|length > 1 else '' }}</span></div>
+        {% for item in p.priorities %}
+          {% set nm = names.get(item.num, item.name) %}
+          {% set identifiants = (p.task_details or {}).get(item.num) or [] %}
+          <details class="prio"{{ ' open' if loop.first else '' }}>
+            <summary>
+              <span class="prio-rank {{ rank_of.get(item.kind, 'pr-na') }}">{{ '%02d'|format(loop.index) }}</span>
+              <span style="flex:1">
+                <span class="prio-name">{{ nm }}</span>
+                <span class="prio-metric">
                   {%- if item.kind == 'na' and item.value|upper == 'N/A' -%}
                     Non évaluable
                   {%- else -%}
                     {{ item.value|replace('.', ',')|replace('%', ' %') }}{% if item.detail and item.detail != '-' %} ({{ item.detail }}){% endif %}
+                  {%- endif %} · cible {{ item.target }}</span>
+              </span>
+              <span class="badge {{ item.css or 'b-na' }}">{{ verdict_label.get(item.kind, item.verdict) }}</span>
+              <svg class="prio-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </summary>
+            <div class="prio-body">
+              <p class="reco">{{ item.comment }}</p>
+              {% if identifiants %}
+                <span class="small muted">Tâches concernées (numéros MS Project) :</span>
+                <div class="task-ids">
+                  {%- for t in identifiants[:60] -%}
+                    <span class="task-id">{{ t }}</span>
+                  {%- endfor -%}
+                  {%- if identifiants|length > 60 -%}
+                    <span class="task-id">+{{ identifiants|length - 60 }} autre{{ 's' if identifiants|length - 60 > 1 else '' }}</span>
                   {%- endif -%}
-                  · <span class="target">cible {{ item.target }}</span>
                 </div>
-                <div class="prio-action">{{ item.comment }}</div>
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-      </div>
-    {% endif %}
-
-    <div class="card">
-      <div class="card-head">
-        <h2>Détail des contrôles</h2>
-        <span class="meta">{{ p.rows|length }} contrôles</span>
-      </div>
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Contrôle</th>
-              <th class="num">Résultat</th>
-              <th class="num">Cible</th>
-              <th>Verdict</th>
-              <th>Tâches concernées (N°)</th>
-              <th>Action recommandée</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in p.rows %}
-              {% if row.num %}
-                {% set nm = names.get(row.num) or (row.name.split('.', 1)[1].strip() if '.' in row.name else row.name) %}
-              {% else %}
-                {% set nm = row.name %}
               {% endif %}
-              <tr>
-                <td>
-                  <div class="ctrl-name">
-                    {% if row.num %}<span class="idx">{{ row.num }}.</span>{% endif %}{{ nm }}
-                  </div>
-                </td>
-                <td class="num">
-                  <div class="val">{{ row.value|replace('.', ',')|replace('%', ' %') }}</div>
-                  {% if row.detail and row.detail != '-' %}<div class="val-sub">{{ row.detail|replace('.', ',') }}</div>{% endif %}
-                </td>
-                <td class="num target-cell">{{ row.target }}</td>
-                <td><span class="badge {{ badge_of.get(row.css, 'b-na') }}" title="{{ row.verdict }}">{{ label_of.get(row.kind, row.verdict) }}</span></td>
-                <td class="ids">
-                  {%- set identifiants = (p.task_details or {}).get(row.num) or [] -%}
-                  {%- if identifiants -%}
-                    {{ identifiants[:20]|join(', ') }}{% if identifiants|length > 20 %} <span class="val-sub">+{{ identifiants|length - 20 }} autre{{ 's' if identifiants|length - 20 > 1 else '' }}</span>{% endif %}
-                  {%- else -%}
-                    —
-                  {%- endif -%}
-                </td>
-                <td class="act">{{ row.comment }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <div class="card-raw">
-        <details class="raw">
-          <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
-          <pre>{{ p.raw }}</pre>
-        </details>
-      </div>
-    </div>
-  {% else %}
-    <div class="callout c-warn">
-      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
-      <div><b>Aucun contrôle exploité</b> — le script n’a produit aucune ligne de contrôle lisible pour ce fichier. Vérifiez que le planning contient des tâches de détail.</div>
-    </div>
-    <details class="raw" open>
-      <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
-      <pre>{{ p.raw }}</pre>
-    </details>
-  {% endif %}
+            </div>
+          </details>
+        {% endfor %}
+      {% endif %}
 
-  {% else %}
-  {# ===================== RÉSULTAT MONTE CARLO ===================== #}
-  {% set exploitable = (not p.stop_message) and (p.metrics or p.criticality) %}
-  <div class="result-top">
-    <div class="page-head mb-0">
-      <h1>Simulation Monte Carlo</h1>
-      <div class="chip-row">
-        <span class="file-chip">
-          <svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg>
-          {{ filename }}
+      <!-- Détail des contrôles -->
+      <div class="sec-title">
+        <h2{% if not p.priorities %} id="diag"{% endif %}>Détail des contrôles</h2><span class="count">{{ p.rows|length }} contrôles</span>
+        <span class="right legend">
+          <span class="li"><span class="lg" style="background:var(--ok)"></span>Conforme</span>
+          <span class="li"><span class="lg" style="background:var(--ko)"></span>À corriger</span>
+          <span class="li"><span class="lg" style="background:var(--na)"></span>N/A</span>
         </span>
       </div>
-    </div>
-    {% if p.stop_message %}
-      <span class="badge b-err badge-lg"><span class="dot"></span> Simulation arrêtée</span>
-    {% elif exploitable %}
-      <span class="badge b-ok badge-lg"><span class="dot"></span> Simulation exploitable</span>
+
+      <div class="card table-card">
+        <div class="table-scroll">
+          <table class="ctrl">
+            <thead>
+              <tr>
+                <th style="width:210px">Contrôle</th>
+                <th>Résultat</th>
+                <th>Cible</th>
+                <th style="width:110px">Verdict</th>
+                <th>Action recommandée</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in p.rows %}
+                {% set nm = names.get(row.num, row.name) %}
+                {% set court, _, frac = nm.partition(' (') %}
+                <tr{% if row.kind == 'ko' %} class="row-ko"{% endif %}>
+                  <td class="ctrl-name">
+                    {% if row.num %}{{ row.num }}. {% endif %}{{ court }}{% if frac %} <span class="frac">({{ frac }}</span>{% endif %}
+                  </td>
+                  <td class="ctrl-result">
+                    {{ row.value|replace('.', ',')|replace('%', ' %') }}
+                    {%- if row.detail and row.detail != '-' %}<span class="frac">{{ row.detail|replace('.', ',') }}</span>{% endif %}
+                  </td>
+                  <td class="ctrl-target">{{ row.target }}</td>
+                  <td><span class="badge {{ row.css or 'b-na' }}" title="{{ row.verdict }}">{{ verdict_label.get(row.kind, row.verdict) }}</span></td>
+                  <td class="ctrl-action">{{ row.comment }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     {% else %}
-      <span class="badge b-na badge-lg"><span class="dot"></span> Résultat incomplet</span>
+      <div class="alert alert-warn">
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span><b>Aucun contrôle exploité</b> — le script n’a produit aucune ligne de contrôle lisible pour ce fichier. Vérifiez que le planning contient des tâches de détail.</span>
+      </div>
     {% endif %}
-  </div>
 
-  {% if p.info.tasks or p.info.links or p.info.sims %}
-    <div class="card card-pad">
-      <div class="facts">
-        {% if p.info.tasks %}<span><b>{{ p.info.tasks }}</b> tâches de détail</span>{% endif %}
-        {% if p.info.links %}<span><b>{{ p.info.links }}</b> liens de dépendance</span>{% endif %}
-        {% if p.info.sims %}<span><b>{{ p.info.sims }}</b> simulations</span>{% endif %}
-      </div>
-    </div>
-  {% endif %}
+    {% if p.raw %}
+      <details class="opt"{{ ' open' if not p.rows else '' }} style="margin-top:14px">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Sortie brute du diagnostic
+          <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="opt-body"><pre>{{ p.raw }}</pre></div>
+      </details>
+    {% endif %}
+    {% endif %}
 
-  {% if p.stop_message %}
-    <div class="callout c-warn">
-      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
-      <div>
-        <b>{{ p.stop_title or "Simulation arrêtée" }}</b>
-        <pre>{{ p.stop_message }}</pre>
-        {% if p.stop_action %}<div>{{ p.stop_action }}</div>{% endif %}
-      </div>
-    </div>
-  {% endif %}
-
-  {% if p.network_warning %}
-    <div class="callout c-warn">
-      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
-      <div><b>{{ p.network_title or 'Logique insuffisante' }}</b> — {{ p.network_warning }}</div>
-    </div>
-  {% endif %}
-
-  {% if p.network_note %}
-    <div class="callout c-info">
-      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 16v-5m0-3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      <div class="meta">{{ p.network_note }}</div>
-    </div>
-  {% endif %}
-
-  {% if exploitable %}
+    {% if mc %}{% set p = mc %}
+    {# ==================== MONTE CARLO ==================== #}
+    {% set exploitable = (not p.stop_message) and (p.metrics or p.criticality) %}
     {% set d = namespace(det=None, p50=None, p80=None, p90=None) %}
     {% for m in p.metrics %}
       {% if m.key == 'deterministic' %}{% set d.det = m %}{% endif %}
@@ -357,141 +318,162 @@
       {% if m.key == 'p90' %}{% set d.p90 = m %}{% endif %}
     {% endfor %}
     {% set cpm = d.det.value_num if d.det else None %}
+    {% set disp = namespace(item=None) %}
+    {% for k in p.kpi %}
+      {% if k.label.startswith('Incertitude') %}{% set disp.item = k %}{% endif %}
+    {% endfor %}
 
-    {% if p.metrics %}
-      <div class="card">
-        <div class="card-head"><h2>Durées simulées</h2><span class="meta">en jours</span></div>
-        <div class="card-pad">
-          <div class="dur-grid">
-            {% for m in p.metrics %}
-              {% set is_rec = (m.key == 'p80') %}
-              <div class="dur{{ ' is-rec' if is_rec else '' }}">
-                {% if is_rec %}<span class="rec">Recommandé</span>{% endif %}
-                <div class="dl">
-                  {%- if m.key == 'deterministic' %}Déterministe (CPM)
-                  {%- elif m.key == 'p50' %}P50 — Médiane
-                  {%- elif m.key == 'p80' %}P80
-                  {%- elif m.key == 'p90' %}P90 — Prudent
-                  {%- else %}{{ m.label }}{% endif -%}
-                </div>
-                <div class="dv">
-                  {%- if m.value_num is not none -%}
-                    {{ '%.1f'|format(m.value_num)|replace('.', ',') }}<small>j</small>
-                  {%- else -%}
-                    {{ m.value }}
-                  {%- endif -%}
-                </div>
-                <div class="dd">
-                  {%- if m.key == 'deterministic' -%}
-                    référence, pas un engagement
-                  {%- elif cpm is not none and m.value_num is not none -%}
-                    {{ '%+.1f'|format(m.value_num - cpm)|replace('.', ',') }} j vs CPM
-                  {%- else -%}
-                    {{ m.target or '—' }}
-                  {%- endif -%}
-                </div>
+    <div class="sec-title" id="mc">
+      <h2>Simulation Monte Carlo</h2>
+      {% if p.info.sims %}<span class="count">{{ p.info.sims }} simulations</span>{% endif %}
+      <span class="right">
+        {% if p.stop_message %}
+          <span class="badge b-ko">Simulation arrêtée</span>
+        {% elif exploitable and p.network_warning %}
+          <span class="badge b-warn">Fiabilité limitée</span>
+        {% elif exploitable %}
+          <span class="badge b-ok">Simulation exploitable</span>
+        {% else %}
+          <span class="badge b-na">Résultat incomplet</span>
+        {% endif %}
+      </span>
+    </div>
+
+    {% if p.stop_message %}
+      <div class="alert alert-warn">
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span><b>{{ p.stop_title or "Simulation arrêtée" }}</b> — {{ p.stop_message }} {{ p.stop_action }}</span>
+      </div>
+    {% endif %}
+
+    {% if p.network_warning %}
+      <div class="alert alert-warn">
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span><b>{{ p.network_title or 'Logique insuffisante' }}</b> — {{ p.network_warning }}</span>
+      </div>
+    {% endif %}
+
+    {% if p.network_note %}
+      <div class="alert alert-info">
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <span>{{ p.network_note }}</span>
+      </div>
+    {% endif %}
+
+    {% if exploitable %}
+      {% if p.metrics %}
+        <div class="mc-durations" style="margin-top:16px">
+          {% for m in [d.det, d.p50, d.p80, d.p90] if m and m.value_num is not none %}
+            {% set est_reco = (m.key == 'p80') %}
+            <div class="dur-card{{ ' ref' if m.key == 'deterministic' else '' }}{{ ' reco' if est_reco else '' }}">
+              <div class="d-label">
+                {%- if m.key == 'deterministic' %}Déterministe (CPM)
+                {%- elif m.key == 'p50' %}P50 — Médiane
+                {%- elif m.key == 'p80' %}P80 — Objectif planning
+                {%- elif m.key == 'p90' %}P90 — Prudent
+                {%- else %}{{ m.label }}{% endif -%}
               </div>
-            {% endfor %}
-          </div>
-
-          {% set disp = namespace(item=None) %}
-          {% for k in p.kpi %}
-            {% if k.label.startswith('Incertitude') %}{% set disp.item = k %}{% endif %}
-          {% endfor %}
-          {% if disp.item %}
-            <div class="hint">
-              Incertitude P50 → P90 : {{ disp.item.value }} · {{ disp.item.sub }} · repère : {{ disp.item.target }}
+              <div class="d-val"{% if est_reco %} style="color:var(--ok)"{% endif %}>{{ '%.1f'|format(m.value_num)|replace('.', ',') }} <small>j</small></div>
+              <div class="d-delta {{ 'd-ref' if m.key == 'deterministic' else ('d-up' if (cpm is not none and m.value_num > cpm) else 'd-dn') }}">
+                {%- if m.key == 'deterministic' -%}
+                  référence, pas un engagement
+                {%- elif cpm is not none -%}
+                  {{ '%+.1f'|format(m.value_num - cpm)|replace('.', ',') }} j vs CPM
+                {%- else -%}
+                  {{ m.target or '—' }}
+                {%- endif -%}
+              </div>
             </div>
-          {% endif %}
+          {% endfor %}
+        </div>
 
-          {# Échelle visuelle des percentiles : CPM à 3 %, P90 à 95 %,
-             repères intermédiaires interpolés linéairement. #}
-          {% if cpm is not none and d.p90 and d.p90.value_num is not none and (d.p90.value_num - cpm) > 0 %}
-            {% set span = d.p90.value_num - cpm %}
-            <div class="scale" aria-hidden="true">
-              <div class="scale-track"></div>
+        {# Échelle visuelle des percentiles : CPM à 2 %, P90 à 98 %, repères
+           intermédiaires interpolés linéairement (barème de la maquette). #}
+        {% if cpm is not none and d.p90 and d.p90.value_num is not none and (d.p90.value_num - cpm) > 0 %}
+          {% set span = d.p90.value_num - cpm %}
+          <div class="card axis-card">
+            <div class="axis">
               {% if d.p80 and d.p80.value_num is not none %}
-                <div class="scale-fill" style="width:{{ (3 + (d.p80.value_num - cpm) / span * 92)|round(1) }}%"></div>
+                <div class="axis-fill" style="left:2%;width:{{ (2 + (d.p80.value_num - cpm) / span * 96)|round(1) }}%"></div>
               {% endif %}
               {% for m in [d.det, d.p50, d.p80, d.p90] if m and m.value_num is not none %}
-                <div class="scale-mark{{ ' mk-cpm' if m.key == 'deterministic' else '' }}{{ ' mk-p80' if m.key == 'p80' else '' }}"
-                     style="left:{{ (3 + (m.value_num - cpm) / span * 92)|round(1) }}%">
-                  <div class="ml">{{ 'CPM' if m.key == 'deterministic' else m.key|upper }}</div>
-                  <div class="pin"></div>
-                  <div class="mv">{{ '%.0f'|format(m.value_num) }}</div>
+                <div class="marker{{ ' m-cpm' if m.key == 'deterministic' else '' }}{{ ' m-p80' if m.key == 'p80' else '' }}"
+                     style="left:{{ (2 + (m.value_num - cpm) / span * 96)|round(1) }}%">
+                  <div class="m-val">{{ '%.0f'|format(m.value_num) }}</div>
+                  <div class="m-lab">{{ 'CPM' if m.key == 'deterministic' else m.key|upper }}</div>
                 </div>
               {% endfor %}
             </div>
-          {% endif %}
-
-          {% if p.decision %}
-            <div class="decision">
-              <svg class="di" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9.7 17h4.6M12 3a7 7 0 00-4 12.7c.6.5 1 1.2 1 2V18h6v-.3c0-.8.4-1.5 1-2A7 7 0 0012 3z"/></svg>
-              <div>
-                <div class="dt">Lecture décisionnelle</div>
-                <div class="db">{{ p.decision }}</div>
-              </div>
+            <div class="axis-caption">
+              <span>Durée simulée (jours)</span>
+              <span>{% if p.info.sims %}{{ p.info.sims }} tirages PERT{% else %}Modèle PERT à 3 points{% endif %}</span>
             </div>
-          {% endif %}
-        </div>
-      </div>
-    {% endif %}
-
-    {% if p.criticality %}
-      <div class="card">
-        <div class="card-head">
-          <h2>Indice de criticité par tâche</h2>
-          <span class="meta">% sur le chemin critique</span>
-        </div>
-        <div class="card-pad">
-          <div class="crit">
-            {% for c in p.criticality %}
-              <div class="crit-row">
-                <div class="crit-name" title="{{ c.name }}">{{ c.name }}</div>
-                <div class="crit-bar">
-                  <div class="crit-fill {{ cf_of.get(c.css, 'cf-med') }}" style="width: {{ c.width }}%"></div>
-                </div>
-                <div class="crit-val {{ cv_of.get(c.css, 'cv-med') }}">{{ c.pct|replace('.', ',') }} %</div>
-              </div>
-            {% endfor %}
+            {% if disp.item %}
+              <div class="mc-meta">Incertitude P50 → P90 : <b>{{ disp.item.value }} · {{ disp.item.sub }}</b> ({{ disp.item.target|lower }})</div>
+            {% endif %}
           </div>
+        {% endif %}
+
+        {% if p.decision %}
+          <div class="callout">
+            <svg class="c-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+            <span><b>Lecture décisionnelle.</b> {{ p.decision }}</span>
+          </div>
+        {% endif %}
+      {% endif %}
+
+      {% if p.criticality %}
+        <div class="sec-title"><h2>Indice de criticité par tâche</h2><span class="count">% sur le chemin critique</span></div>
+        <div class="card crit-list">
+          {% for c in p.criticality %}
+            <div class="crit-row">
+              <span class="crit-id" title="{{ c.name }}">{{ c.name }}</span>
+              <div class="crit-bar"><div class="crit-fill{{ ' hot' if c.css == 'high' }}" style="width:{{ c.width }}%"></div></div>
+              <span class="crit-val">{{ c.pct|replace('.', ',') }} %</span>
+            </div>
+          {% endfor %}
           <div class="crit-note">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 8v4m0 4h.01"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/></svg>
-            Surveiller en priorité les tâches au-delà de 70 % de criticité.
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Surveillez en priorité les tâches au-delà de 70 % de criticité.
           </div>
         </div>
-      </div>
+      {% endif %}
     {% endif %}
-  {% endif %}
 
-  {% if p.raw %}
-    <details class="raw"{% if not exploitable %} open{% endif %}>
-      <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
-      <pre>{{ p.raw }}</pre>
-    </details>
-  {% endif %}
-  {% endif %}
+    {% if p.raw %}
+      <details class="opt"{{ ' open' if not exploitable else '' }} style="margin-top:14px">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Sortie brute de la simulation
+          <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="opt-body"><pre>{{ p.raw }}</pre></div>
+      </details>
+    {% endif %}
+    {% endif %}
 
   </div>
-{% endfor %}
 </section>
 
-{# Garde-fou : un clic accidentel sur « Nouvelle analyse » ferait perdre le
-   résultat affiché (il naît d'un POST, il n'est conservé nulle part).
-   Amélioration progressive uniquement : sans JavaScript, le lien fonctionne
-   normalement et le formulaire reste utilisable. #}
 <script>
   (function () {
-    var link = document.getElementById("tab-form");
-    if (!link || !window.confirm) return;
-    link.addEventListener("click", function (ev) {
-      var ok = window.confirm(
-        "Quitter ce résultat ?\n\n" +
-        "L’analyse affichée ne sera plus accessible : il faudra la relancer sur le même fichier " +
-        "(1 analyse décomptée de votre quota).\n\n" +
-        "Le bouton Précédent du navigateur permet de revenir à ce résultat sans relancer l’analyse."
-      );
-      if (!ok) ev.preventDefault();
+    // Impression : le bouton de la maquette n'obéit qu'au JavaScript, sans lui
+    // l'impression reste accessible par le navigateur.
+    var bouton = document.getElementById("print-btn");
+    if (bouton) bouton.addEventListener("click", function () { window.print(); });
+
+    // Garde-fou : quitter un résultat le perd définitivement (il naît d'un POST
+    // et n'est conservé nulle part). Amélioration progressive uniquement.
+    if (!window.confirm) return;
+    var message =
+      "Quitter ce résultat ?\n\n" +
+      "L’analyse affichée ne sera plus accessible : il faudra la relancer sur le même fichier " +
+      "(1 analyse décomptée de votre quota).\n\n" +
+      "Le bouton Précédent du navigateur permet de revenir à ce résultat sans relancer l’analyse.";
+    [].forEach.call(document.querySelectorAll("[data-quit]"), function (lien) {
+      lien.addEventListener("click", function (ev) {
+        if (!window.confirm(message)) ev.preventDefault();
+      });
     });
   })();
 </script>

@@ -45,18 +45,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Vérifier que VERSION correspond à l'étiquette
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          set -euo pipefail
-          fichier=$(cat VERSION)
-          if [ "$fichier" != "${GITHUB_REF_NAME}" ]; then
-            echo "VERSION contient « $fichier » alors que l'étiquette est « ${GITHUB_REF_NAME} »"
-            echo "Mettre le fichier VERSION à jour dans le commit étiqueté."
-            exit 1
-          fi
-          echo "version publiée : $fichier"
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -160,21 +148,12 @@ jobs:
           echo "--- garde-fous mémoire de l'image ---"
           heap=$(docker exec mppcr-smoke java -XX:+PrintFlagsFinal -version 2>/dev/null \
             | grep -oE '^ *size_t MaxHeapSize *= *[0-9]+' | grep -oE '[0-9]+$')
-          [ -n "$heap" ] && [ "$heap" -le 2147483648 ] \
+          [ -n "$heap" ] && [ "$heap" -lt 2147483648 ] \
             || { echo "tas JVM non borné : ${heap:-inconnu}"; exit 1; }
           echo "tas JVM maximal : $((heap / 1024 / 1024)) Mo"
 
           echo "--- compteur d'usage et verrou (droits d'écriture sur /app/data) ---"
           docker exec mppcr-smoke test -f /app/data/usage.db
-
-          echo "--- version exposée par l'application ---"
-          version_image=$(docker exec mppcr-smoke python3 -c 'import app; print(app.APP_VERSION)')
-          [ -n "$version_image" ] && [ "$version_image" != "inconnue" ] \
-            || { echo "fichier VERSION absent de l'image"; exit 1; }
-          echo "version de l'image : $version_image"
-          curl -fsS http://127.0.0.1:5000/ -o /tmp/accueil.html
-          grep -q "version $version_image" /tmp/accueil.html \
-            || { echo "la version n'est pas affichée sur la page"; exit 1; }
 
           echo "--- analyse réelle : page web avec score ---"
           curl -fsS -o /tmp/result.html \

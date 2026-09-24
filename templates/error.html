@@ -5,23 +5,28 @@
 {% block title %}{{ title|default('Analyse impossible', true) }} — MPPCR{% endblock %}
 
 {% block content %}
-<section class="view">
-  <div class="page-head">
-    <h1>{{ title|default('Analyse impossible', true) }}</h1>
-  </div>
+<section class="view" id="view-form">
+  <div class="container">
+    <div class="page-head">
+      <h1>{{ title|default('Analyse impossible', true) }}</h1>
+      <p>L’analyse n’a pas pu être menée à son terme. Aucun planning n’a été conservé.</p>
+    </div>
 
-  <div class="callout {{ 'c-warn' if v == 'warn' else 'c-err' }}">
-    {% if v == 'warn' %}
-      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
-    {% else %}
-      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
-    {% endif %}
-    <div>{{ message }}</div>
-  </div>
+    <div class="alert alert-{{ 'warn' if v == 'warn' else 'danger' }}">
+      {% if v == 'warn' %}
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      {% else %}
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      {% endif %}
+      <span>{{ message }}</span>
+    </div>
 
-  <a class="btn" href="{{ url_for('index') }}">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
-    Analyser un autre planning
-  </a>
+    <p style="margin-top:18px">
+      <a class="btn btn-primary" href="{{ url_for('index') }}" style="width:auto">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Analyser un planning
+      </a>
+    </p>
+  </div>
 </section>
 {% endblock %}

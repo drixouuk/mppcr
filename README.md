@@ -23,6 +23,32 @@ Deux outils :
 Le projet est défini comme son propre PID (pas de portefeuille multi-projets),
 en français, sans authentification (voir [Sécurité](#sécurité--avertissement)).
 
+## Interface
+
+Trois écrans, sans JavaScript obligatoire ni ressource externe (aucune police
+téléchargée, aucune CDN) :
+
+1. **Analyser un planning** — trois étapes numérotées : le fichier (zone de
+   dépôt), le type d'analyse (DCMA-14, Monte Carlo, ou les deux), les options.
+   Un panneau latéral rappelle le fichier choisi, l'analyse et les exports
+   demandés, affiche le quota du jour et porte le bouton de lancement.
+2. **Résultat** — un en-tête (fichier, date d'état, faits marquants, boutons
+   d'export et d'impression), le **score de conformité** avec sa bande et ses
+   repères, cinq compteurs de contrôles, un bandeau d'alerte quand un point est
+   bloquant, puis les **priorités d'amélioration** (volet dépliable par écart :
+   action recommandée et numéros de tâches concernés) et le **détail des
+   14 contrôles**. La simulation Monte Carlo suit dans la même page :
+   P50 / P80 / P90, axe des percentiles, lecture décisionnelle et indice de
+   criticité par tâche.
+3. **Erreur** — fichier refusé, quota atteint, analyse interrompue ou échec de
+   lecture, avec le motif et le retour au formulaire.
+
+Le fil d'étapes de l'en-tête situe en permanence l'écran courant, et la version
+déployée y est affichée. La mise en forme suit la maquette `mppcr-redesign.html`
+(v2) : sa feuille de style est reprise **verbatim** dans `templates/base.html`,
+un second bloc ne portant que les ajouts propres au rendu serveur — un contrôle
+automatisé compare les deux fichiers (voir [Contrôles et tests](#contrôles-et-tests)).
+
 ## Démarrage rapide
 
 ```bash
@@ -154,7 +180,8 @@ sur décision explicite, mesure avant/après à l'appui.
 
 La seconde analyse est une **simulation de risque planning** : pour chaque tâche,
 une distribution PERT (optimiste / probable / pessimiste) est construite à partir
-de la durée planifiée et des facteurs `--opt` / `--pess` (0,8 et 1,5 par défaut),
+de la durée planifiée et des facteurs `--opt` / `--pess` (0,8 et 1,5 par défaut,
+0,7 et 1,8 pour un jeu plus prudent — le formulaire propose ces deux jeux),
 ou de vraies estimations 3-points fournies dans un CSV (`--estimates`,
 `task_id,optimistic,most_likely,pessimistic` en jours). N tirages sont ensuite
 enchaînés par un passage avant sur le réseau de dépendances, et le script rend
@@ -260,12 +287,14 @@ MPPCR, **versionnée** (affichée sur la page) pour rester comparable d'une anal
 
 ## Tâches concernées
 
-Le tableau des contrôles comporte une colonne **« Tâches concernées (N°) »** : les
-numéros de tâche (colonne N° de MS Project) en écart pour chaque contrôle. Le
-tableau en affiche jusqu'à 20, puis « +N autres » ; les exports CSV et Excel
-contiennent la **liste complète**.
+Chaque **priorité d'amélioration** de la page de résultat liste les numéros de
+tâche (colonne N° de MS Project) en écart pour le contrôle concerné, sous forme
+de pastilles : jusqu'à 60 numéros, puis « +N autres ». Le tableau « Détail des
+contrôles » ne porte plus cette information (la maquette v2 l'a déplacée dans
+les priorités, là où l'action est décrite) ; les exports CSV et Excel conservent
+la **liste complète**, sans troncature.
 
-Cette colonne s'appuie sur l'option `--details` de `dcma14.py`, ajoutée pour
+Ces numéros s'appuient sur l'option `--details` de `dcma14.py`, ajoutée pour
 l'occasion : elle n'ajoute qu'un bloc technique à la fin de la sortie, après la
 ligne « Resume ». **Sans cette option, la sortie du script est strictement
 identique** à celle des versions précédentes — une référence figée est comparée
@@ -289,7 +318,9 @@ par la bibliothèque de lecture, qui parlent.
 Le résultat est **toujours affiché dans le navigateur**. Les exports sont
 *facultatifs et cumulables* : ils se demandent au dépôt du formulaire, dans le
 volet « Export des résultats (facultatif) », et apparaissent ensuite en boutons
-de téléchargement sur la page de résultat.
+dans l'en-tête de la page de résultat. Un export non demandé y reste visible
+(avec l'indication du volet à cocher) mais inerte, à côté du bouton
+**Imprimer / PDF**.
 
 | Export | Contenu |
 | --- | --- |
@@ -522,6 +553,25 @@ Repartition par macro-tache (niveau 1) :
   visible (un lot peut finir avant son prédécesseur). Ranger les liens sur les
   tâches de détail, comme le fait MS Project dans un planning piloté, l'évite.
 
+## Contrôles et tests
+
+Trois vérifications, à lancer avant toute publication :
+
+| Vérification | Portée | Volume |
+| --- | --- | --- |
+| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports, mémoire, non-régression des sorties de référence | 293 |
+| `alignment_check.py` | feuille de style de la maquette reprise **verbatim**, jetons, classes, structure des écrans | 188 |
+| `verify_prod.sh` | production réelle : conteneur, HTTP, exports, refus, charge, absence de résidu | 53 |
+
+Les deux premières tournent **dans l'image de production** (seul environnement qui
+embarque Flask, JPype, MPXJ et Java) : `lancer_lxc.sh` y copie le code de staging
+et le harnais, puis exécute la commande demandée. `verify_prod.sh` interroge le
+conteneur en fonctionnement sur `http://127.0.0.1:5000`.
+
+Les sorties de `dcma14.py` et `montecarlo.py` sont comparées **pour de vrai** aux
+références figées (`ref_dcma.txt`, `ref_mc.txt`) : elles ne sont régénérées que
+lorsqu'un contrôle change de comportement de façon délibérée.
+
 ## Journal des versions
 
 Les correctifs et les changements de comportement sont consignés dans
@@ -551,7 +601,8 @@ Le workflow se déclenche sur push vers `main` et sur les tags `v*` :
 Le fichier **`VERSION`** (racine du dépôt) est embarqué dans l'image et fait foi.
 La version est :
 
-- **affichée en pied de page** de l'application, sur toutes les pages ;
+- **affichée dans l'en-tête** de l'application, sur toutes les pages, ainsi
+  qu'en pied de page ;
 - écrite dans les **exports CSV**, à côté de la date ;
 - **journalisée au démarrage** (`MPPCR vX.Y.Z — démarrage`), donc lisible par
   `docker logs` ;
@@ -574,4 +625,14 @@ Change visibility) — un paquet privé empêche le `docker run` sans authentifi
 
 ## Licence
 
-À définir par l'auteur du dépôt.
+**GNU General Public License, version 3 (GPL-3.0)** — voir le fichier
+[`LICENSE`](LICENSE).
+
+Copyright (C) 2026 l'auteur du dépôt MPPCR.
+
+Ce programme est un logiciel libre : vous pouvez le redistribuer et/ou le
+modifier selon les termes de la licence GPL-3.0 publiée par la Free Software
+Foundation, dans sa version 3 ou, à votre choix, toute version ultérieure. Il est
+distribué dans l'espoir qu'il sera utile, mais **sans aucune garantie** ; voir la
+licence pour les détails. Toute redistribution d'une version modifiée doit
+conserver la même licence et rendre le code source disponible.
