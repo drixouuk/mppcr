@@ -1,5 +1,17 @@
 # MPPCR — MS Project Check & Risk
 
+<img width="1125" height="673" alt="image" src="https://github.com/user-attachments/assets/ef742eae-10bc-40b8-9d4b-7e18c8bc8b3b" />
+
+
+
+
+
+**Simulation Monte Carlo**
+<img width="1095" height="767" alt="image" src="https://github.com/user-attachments/assets/f28ac795-950d-425d-9745-e9e5c787edb2" />
+
+
+
+
 Analyse qualité et analyse de risque de plannings MS Project (`.mpp`), exposées
 dans une interface web simple.
 
