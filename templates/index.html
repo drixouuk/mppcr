@@ -117,6 +117,16 @@
                 <input type="file" id="est" name="estimates_file" accept=".csv">
                 <p class="small muted" style="margin-top:6px">Format : <span class="mono">task_id,optimistic,most_likely,pessimistic</span> en jours.</p>
               </div>
+              <div class="field">
+                <label for="macro">Répartition du risque par lot (facultatif)</label>
+                <select id="macro" name="macro_level">
+                  <option value="" selected>Aucune — résultat global seulement</option>
+                  <option value="1">Niveau 1 — lots sous la tâche projet</option>
+                  <option value="2">Niveau 2 — sous-lots</option>
+                  <option value="3">Niveau 3</option>
+                </select>
+                <p class="small muted" style="margin-top:6px">Le moteur simule toujours au niveau détail ; seule la restitution du risque est regroupée par lot.</p>
+              </div>
             </div>
           </details>
         </div>
@@ -242,9 +252,13 @@
       var sims = document.getElementById("sims");
       var exports = [].slice.call(form.querySelectorAll('input[name="export"]:checked'))
         .map(function (c) { return c.value === "xlsx" ? "Excel" : "CSV"; });
+      var macro = document.getElementById("macro");
       var parties = [];
       if (coche && coche.value !== "dcma" && sims) {
         parties.push(sims.options[sims.selectedIndex].text.split(" (")[0] + " simulations");
+        if (macro && macro.value) {
+          parties.push("par lot (niveau " + macro.value + ")");
+        }
       }
       parties.push(exports.length ? "export " + exports.join(" + ") : "aucun export");
       if (ctaOpts) ctaOpts.textContent = parties.join(" · ");

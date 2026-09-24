@@ -3,6 +3,37 @@
 Les versions antérieures à la v1.6.0 sont documentées dans les
 [releases GitHub](https://github.com/drixouuk/mppcr/releases).
 
+## v1.14.0 — branche `dev/montecarlo-macro` (non publiée)
+
+### Ajouté
+- **Répartition du risque par lot dans l'interface** (l'option
+  `montecarlo.py --macro-level N` existait depuis la v1.12.0 mais n'était
+  accessible qu'en ligne de commande) :
+  - formulaire : champ « Répartition du risque par lot (facultatif) » dans les
+    options Monte Carlo, avec la liste fixe **niveau 1, 2 ou 3** (aucune saisie
+    libre) ;
+  - page de résultat : tableau **lot / P50 / P80 / P90 / écart vs planifié /
+    criticité**, trié par P90 décroissant, plus le seau « Tâches hors lot » ;
+  - exports CSV (section « RÉPARTITION DU RISQUE PAR LOT ») et Excel (bloc dans
+    la feuille « Monte Carlo »).
+- **Avertissement sur les liens portés par une tâche récapitulative** : un
+  planning ne devrait pas en contenir (les liens relient des tâches de détail).
+  Comme la simulation ne retient que les détails, ces liens sont ignorés ; le
+  script les **compte et les cite** (`Liens sur taches recapitulatives : N -- ex. :
+  …`) et la page affiche un bandeau d'avertissement, sans aucun correctif
+  silencieux du réseau. **L'avertissement n'apparaît qu'avec la répartition par
+  lot** : la sortie par défaut du script reste strictement identique, la
+  référence figée des tests reste donc valable.
+- Quand le niveau demandé n'existe pas dans le planning, la page explique
+  pourquoi (niveaux présents) au lieu d'afficher un tableau vide.
+
+### Mesuré
+- Sur le plan témoin à 4 programmes chaînés : 5 groupes (4 programmes + hors
+  lot), tri par P90 décroissant, aucun lien de récapitulative signalé.
+- Sur le témoin à liens de récapitulative : 1 lien détecté et cité
+  (`Phase 1 — Conception -> Phase 2 — Réalisation`), et la répartition montre
+  bien les deux phases en parallèle — la cause est désormais écrite à l'écran.
+
 ## v1.13.0
 
 ### Modifié

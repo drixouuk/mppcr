@@ -31,6 +31,12 @@ Repartition par macro-tache (option --macro-level N) :
     elle, la sortie est strictement identique a celle des versions precedentes.
   - Les taches de detail qui ne dependent d'aucune recapitulative de ce niveau sont
     regroupees sous « Taches hors lot », pour que la vue soit complete.
+  - Les liens portes par une tache RECAPITULATIVE sont signales (ligne « Liens sur
+    taches recapitulatives : N »). Un planning ne devrait pas en contenir : comme
+    la simulation ne retient que les taches de detail, ces liens sont ignores et
+    un lot peut finir avant son predecesseur. Aucun correctif n'est applique,
+    c'est un avertissement ; il n'apparait qu'avec l'option, donc la sortie par
+    defaut reste inchangee.
 
 Usage:
   python3 montecarlo.py planning.mpp --sims 5000
@@ -318,6 +324,37 @@ def run_simulation(G, n_sims, rng, macros=None, seed_report_every=1000):
     return finish_dates, on_critical
 
 
+def liens_recapitulatifs(proj):
+    """Repere les liens de dependance portes par une tache RECAPITULATIVE.
+
+    Un planning ne devrait pas en contenir : les liens relient des taches de
+    detail. Comme build_graph() ne retient que ces dernieres, ces liens sont
+    IGNORES dans la simulation -- le reseau est simule comme s'ils n'existaient
+    pas. On les compte pour le DIRE, sans rien corriger : c'est un avertissement
+    affiche avec la repartition par macro-tache, la seule vue ou le phenomene se
+    voit (un lot peut finir avant son predecesseur).
+
+    Rend (nombre_de_liens, ["Predecesseur -> Successeur", ...] limite a 3).
+    """
+    total = 0
+    exemples = []
+    for tache in proj.getTasks():
+        if tache is None or tache.getName() is None:
+            continue
+        relations = list(tache.getPredecessors() or [])
+        if not relations:
+            continue
+        for relation in relations:
+            predecesseur = relation.getPredecessorTask()
+            if predecesseur is None:
+                continue
+            if tache.getSummary() or predecesseur.getSummary():
+                total += 1
+                if len(exemples) < 3:
+                    exemples.append(f"{predecesseur.getName()} -> {tache.getName()}")
+    return total, exemples
+
+
 def afficher_repartition_macros(proj, niveau, macros, fins_macros, critiques_macros,
                                n_sims, deterministe_noeuds):
     """Bloc « Repartition par macro-tache », trie par P90 decroissant.
@@ -329,6 +366,16 @@ def afficher_repartition_macros(proj, niveau, macros, fins_macros, critiques_mac
     tache, sinon un lot de 200 taches paraitrait cent fois plus critique qu'un lot
     de 2 taches a structure identique.
     """
+    nb_recap, exemples = liens_recapitulatifs(proj)
+    if nb_recap:
+        detail = f" -- ex. : {' ; '.join(exemples)}" if exemples else ""
+        print(f"Liens sur taches recapitulatives : {nb_recap} "
+              f"(ignores dans la simulation){detail}")
+        print("  Un planning ne devrait pas en contenir : ces liens ne relient pas des")
+        print("  taches de detail. Les lots sont donc simules sans eux, ce qui peut")
+        print("  donner a un lot une duree trop courte devant son predecesseur.")
+        print()
+
     if not macros:
         niveaux = niveaux_recapitulatifs(proj)
         if niveau in niveaux:

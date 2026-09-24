@@ -440,6 +440,60 @@
       {% endif %}
     {% endif %}
 
+    {# Répartition facultative du risque par lot WBS (`--macro-level N`) : la
+       maquette v2 ne prévoit pas ce tableau (l'option n'existait pas dans son
+       périmètre), il réutilise donc ses composants — titres de section et
+       tableau des contrôles. #}
+    {% if p.macro_level %}
+      {% if p.macro_warning %}
+        <div class="alert alert-warn">
+          <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span><b>Liens portés par des tâches récapitulatives</b> — {{ p.macro_warning }}</span>
+        </div>
+      {% endif %}
+
+      {% if p.macros %}
+        <div class="sec-title">
+          <h2>Répartition du risque par lot</h2>
+          <span class="count">Niveau {{ p.macro_level }} · {{ p.macros|length }} lot{{ 's' if p.macros|length > 1 else '' }}</span>
+          <span class="right small muted">Criticité : part des tirages où le lot touche le chemin critique</span>
+        </div>
+        <div class="card table-card">
+          <div class="table-scroll">
+            <table class="ctrl">
+              <thead>
+                <tr>
+                  <th>Lot</th>
+                  <th>P50</th>
+                  <th>P80</th>
+                  <th>P90</th>
+                  <th>Écart P50 vs planifié</th>
+                  <th>Criticité</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for lot in p.macros %}
+                  <tr>
+                    <td class="ctrl-name">{{ lot.name }}</td>
+                    <td class="ctrl-result">{{ lot.p50|replace('.', ',') }} <span class="frac">j</span></td>
+                    <td class="ctrl-target">{{ lot.p80|replace('.', ',') }} j</td>
+                    <td class="ctrl-target">{{ lot.p90|replace('.', ',') }} j</td>
+                    <td class="ctrl-target"><span class="{{ 'd-up' if lot.ecart.startswith('+') else 'd-dn' }}">{{ lot.ecart|replace('.', ',') }} j</span></td>
+                    <td class="ctrl-result">{{ lot.criticite|replace('.', ',') }} %</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% elif p.macro_message %}
+        <div class="alert alert-info">
+          <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span><b>Répartition par lot indisponible</b> — {{ p.macro_message }}</span>
+        </div>
+      {% endif %}
+    {% endif %}
+
     {% if p.raw %}
       <details class="opt"{{ ' open' if not exploitable else '' }} style="margin-top:14px">
         <summary>

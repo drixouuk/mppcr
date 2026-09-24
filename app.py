@@ -1106,6 +1106,42 @@ def enrich_montecarlo(parsed):
 
         parsed["decision"] = decision
 
+    # Le script parle sans accents ; la page parle français. Les trois messages
+    # possibles sont réécrits ici (source unique, partagée avec les exports).
+    if parsed.get("macro_level") and not parsed["macros"] and parsed.get("macro_message"):
+        brut = parsed["macro_message"]
+        niveau = parsed["macro_level"]
+        if "niveaux disponibles" in brut:
+            trouves = re.search(r"\[([^\]]*)\]", brut)
+            presents = trouves.group(1) if trouves else ""
+            parsed["macro_message"] = (
+                f"Aucune tâche récapitulative de niveau {niveau} dans ce planning"
+                + (f" (niveaux présents : {presents})" if presents else "")
+                + " : la répartition par lot n'a rien à regrouper."
+            )
+        elif "aucune tache de detail exploitable" in brut:
+            parsed["macro_message"] = (
+                f"Les tâches récapitulatives de niveau {niveau} ne contiennent aucune tâche "
+                "de détail exploitable : rien à répartir par lot."
+            )
+        else:
+            parsed["macro_message"] = (
+                "Aucune tâche récapitulative dans ce planning : la répartition par lot "
+                "est sans effet."
+            )
+
+    if parsed.get("macro_recap_links"):
+        nombre = parsed["macro_recap_links"]
+        exemples = parsed.get("macro_recap_examples") or []
+        complement = f" Exemples : {' ; '.join(exemples)}." if exemples else ""
+        parsed["macro_warning"] = (
+            f"{nombre} lien{'s' if nombre > 1 else ''} de dépendance porté"
+            f"{'s' if nombre > 1 else ''} par une tâche récapitulative "
+            f"{'sont ignorés' if nombre > 1 else 'est ignoré'} dans la simulation : un planning "
+            "ne devrait pas en contenir. La répartition par lot peut donc être faussée "
+            "(un lot peut finir avant son prédécesseur)." + complement
+        )
+
     tasks = first_int(parsed["info"].get("tasks"))
     links = first_int(parsed["info"].get("links"))
     if tasks and links is not None:
@@ -1166,7 +1202,13 @@ def croiser_logique_montecarlo(montecarlo, dcma):
         )
 
 
-def parse_montecarlo_output(text):
+def parse_montecarlo_output(text, macro_level=None):
+    """Sortie de montecarlo.py -> structure affichée.
+
+    `macro_level` est le niveau de répartition demandé à l'appel : le script ne
+    l'écrit dans sa sortie que lorsqu'il produit le tableau, un niveau absent du
+    planning ne laisserait donc aucune trace du choix de l'utilisateur.
+    """
     parsed = {
         "raw": text,
         "title": None,
@@ -1180,11 +1222,20 @@ def parse_montecarlo_output(text):
         "decision": "",
         "network": None,
         "network_warning": "",
+        # Répartition par lot (`--macro-level N`) : niveau demandé, tableau par
+        # lot, message du script quand aucun lot n'existe, et avertissement sur
+        # les liens portés par une tâche récapitulative.
+        "macro_level": macro_level,
+        "macros": [],
+        "macro_message": "",
+        "macro_recap_links": 0,
+        "macro_recap_examples": [],
     }
 
     stop_mode = False
     stop_lines = []
     in_criticality = False
+    in_macro = False
 
     for line in text.splitlines():
         stripped = line.strip()
@@ -1248,12 +1299,52 @@ def parse_montecarlo_output(text):
             in_criticality = True
             continue
 
-        if stripped.startswith("Repartition par macro-tache"):
-            # Section produite par `montecarlo.py --macro-level` : l'application ne
-            # demande jamais cette option, mais un fichier de sortie peut en
-            # contenir. Ses lignes finissent elles aussi par un pourcentage, elles
-            # ne doivent donc pas être prises pour des entrées de criticité.
+        if stripped.startswith("Repartition par macro-tache (niveau"):
+            # Section produite par `montecarlo.py --macro-level N` : elle suit le
+            # bloc de criticité et ses lignes finissent elles aussi par un
+            # pourcentage. On entre donc en mode « macro » pour ne pas les prendre
+            # pour des entrées de criticité.
             in_criticality = False
+            in_macro = True
+            niveau = first_int(stripped.split("(niveau", 1)[1])
+            if niveau is not None:
+                parsed["macro_level"] = niveau
+            continue
+
+        if stripped.startswith("Liens sur taches recapitulatives :"):
+            # Avertissement : liens portés par une tâche récapitulative, ignorés
+            # par la simulation (build_graph ne retient que les détails).
+            parsed["macro_recap_links"] = first_int(stripped) or 0
+            _, _, exemples = stripped.partition("ex. :")
+            parsed["macro_recap_examples"] = [
+                exemple.strip() for exemple in exemples.split(";") if exemple.strip()
+            ]
+            continue
+
+        if stripped.startswith(("Aucune tache recapitulative",
+                                "Les taches recapitulatives de niveau")):
+            parsed["macro_message"] = stripped
+            continue
+
+        if in_macro:
+            lot = re.match(
+                r"^(.+?)\s+P50: ([0-9.]+) j \(([+-][0-9.]+) j vs planifie\)\s+"
+                r"P80: ([0-9.]+) j\s+P90: ([0-9.]+) j\s+Criticite:\s*([0-9.]+)%$",
+                stripped,
+            )
+            if lot:
+                parsed["macros"].append(
+                    {
+                        "name": lot.group(1).strip(),
+                        "p50": lot.group(2),
+                        "ecart": lot.group(3),
+                        "p80": lot.group(4),
+                        "p90": lot.group(5),
+                        "criticite": lot.group(6),
+                        "p50_num": float(lot.group(2)),
+                        "criticite_num": float(lot.group(6)),
+                    }
+                )
             continue
 
         if in_criticality:
@@ -1318,6 +1409,28 @@ def parse_montecarlo_options(form):
         raise ValueError("Le facteur pessimiste doit être supérieur ou égal au facteur optimiste.")
 
     return sims, opt, pess
+
+
+NIVEAUX_MACRO = (1, 2, 3)
+
+
+def niveau_macro(form):
+    """Niveau de plan de la répartition par lot, ou None si non demandée.
+
+    Liste fixe 1 à 3 (choix de l'utilisateur) : la répartition par lot est
+    facultative, et un niveau absent du planning est signalé par le script lui-même
+    avec la liste des niveaux disponibles.
+    """
+    brut = (form.get("macro_level") or "").strip()
+    if not brut or brut.lower() in {"aucune", "none"}:
+        return None
+    try:
+        niveau = int(brut)
+    except ValueError:
+        raise ValueError("Le niveau de répartition par lot doit être un entier de 1 à 3.")
+    if niveau not in NIVEAUX_MACRO:
+        raise ValueError("Le niveau de répartition par lot doit être compris entre 1 et 3.")
+    return niveau
 
 
 def run_script(cmd, label, token=None):
@@ -1524,6 +1637,28 @@ def mc_export_rows(parsed):
     return rows
 
 
+def macro_export_rows(parsed):
+    """Répartition du risque par lot (option `--macro-level N`), telle qu'affichée.
+
+    L'écart est celui du P50 simulé du lot par rapport à sa durée planifiée (fin au
+    plus tôt de son chemin), et la criticité la part des simulations où au moins une
+    tâche du lot est sur le chemin critique.
+    """
+    rows = []
+    for lot in parsed.get("macros") or []:
+        rows.append(
+            [
+                lot.get("name", ""),
+                lot.get("p50", ""),
+                lot.get("p80", ""),
+                lot.get("p90", ""),
+                lot.get("ecart", ""),
+                lot.get("criticite", ""),
+            ]
+        )
+    return rows
+
+
 def dispersion_export_line(parsed):
     """Indicateur de dispersion P50 → P90 déjà calculé par enrich_montecarlo()."""
     for kpi in parsed.get("kpi") or []:
@@ -1625,6 +1760,20 @@ def csv_export_payload(results, filename):
             writer.writerow(["Tâche", "Criticité (%)", "Lecture"])
             for item in montecarlo["criticality"]:
                 writer.writerow([item["name"], item["pct"], item["level"]])
+
+        if montecarlo.get("macro_level"):
+            writer.writerow([])
+            writer.writerow(["# RÉPARTITION DU RISQUE PAR LOT", f"niveau {montecarlo['macro_level']}"])
+            rows = macro_export_rows(montecarlo)
+            if rows:
+                writer.writerow(["Lot", "P50 (j)", "P80 (j)", "P90 (j)",
+                                 "Écart P50 vs planifié (j)", "Criticité (%)"])
+                writer.writerows(rows)
+            if montecarlo.get("macro_warning"):
+                writer.writerow([])
+                writer.writerow(["Avertissement", montecarlo["macro_warning"]])
+            if montecarlo.get("macro_message"):
+                writer.writerow(["Répartition indisponible", montecarlo["macro_message"]])
 
     if dcma and dcma.get("summary"):
         writer.writerow([])
@@ -1813,6 +1962,31 @@ def xlsx_export_payload(results, filename):
                 sheet.write(row, 2, item["level"])
                 row += 1
 
+        if montecarlo.get("macro_level"):
+            row += 2
+            sheet.write(row, 0, f"Répartition du risque par lot (niveau {montecarlo['macro_level']})",
+                        titre)
+            row += 1
+            lignes_lots = macro_export_rows(montecarlo)
+            if lignes_lots:
+                for column, label in enumerate(["Lot", "P50 (j)", "P80 (j)", "P90 (j)",
+                                                "Écart P50 vs planifié (j)", "Criticité (%)"]):
+                    sheet.write(row, column, label, entete)
+                row += 1
+                for ligne in lignes_lots:
+                    for column, valeur in enumerate(ligne):
+                        sheet.write(row, column, valeur)
+                    row += 1
+            if montecarlo.get("macro_warning"):
+                row += 1
+                sheet.write(row, 0, "Avertissement", libelle)
+                sheet.write(row, 1, montecarlo["macro_warning"], texte)
+                row += 1
+            if montecarlo.get("macro_message"):
+                sheet.write(row, 0, "Répartition indisponible", libelle)
+                sheet.write(row, 1, montecarlo["macro_message"], texte)
+                row += 1
+
     workbook.close()
     return output.getvalue()
 
@@ -1932,11 +2106,12 @@ def analyse():
         return render_template("error.html", message="Seuls les fichiers .mpp sont acceptés."), 400
 
     include_montecarlo = analysis in {"montecarlo", "both"}
-    sims = opt = pess = None
+    sims = opt = pess = macro_level = None
 
     if include_montecarlo:
         try:
             sims, opt, pess = parse_montecarlo_options(request.form)
+            macro_level = niveau_macro(request.form)
         except ValueError as exc:
             return render_template("error.html", message=str(exc)), 400
 
@@ -2025,13 +2200,18 @@ def analyse():
                 if estimates_path is not None:
                     cmd.extend(["--estimates", str(estimates_path)])
 
+                # Répartition facultative par lot WBS (niveau 1 à 3) : le moteur
+                # simule toujours au niveau détail, seule la restitution change.
+                if macro_level is not None:
+                    cmd.extend(["--macro-level", str(macro_level)])
+
                 stdout = run_script(cmd, "la simulation Monte Carlo", token=client_token)
                 quota_counted = count_analysis(ip, quota_counted)
                 results.append(
                     {
                         "kind": "montecarlo",
                         "title": "Simulation Monte Carlo",
-                        "parsed": parse_montecarlo_output(stdout),
+                        "parsed": parse_montecarlo_output(stdout, macro_level),
                     }
                 )
 
