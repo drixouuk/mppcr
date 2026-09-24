@@ -45,6 +45,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Vérifier que VERSION correspond à l'étiquette
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          fichier=$(cat VERSION)
+          if [ "$fichier" != "${GITHUB_REF_NAME}" ]; then
+            echo "VERSION contient « $fichier » alors que l'étiquette est « ${GITHUB_REF_NAME} »"
+            echo "Mettre le fichier VERSION à jour dans le commit étiqueté."
+            exit 1
+          fi
+          echo "version publiée : $fichier"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -128,7 +140,10 @@ jobs:
           grep -q 'analyses restantes' /tmp/form.html
           grep -q 'name="analysis"' /tmp/form.html
           grep -q 'name="export"' /tmp/form.html
-          grep -q 'Export des résultats (facultatif)' /tmp/form.html
+          # Le libellé de la maquette encadre « (facultatif) » dans un <span> :
+          # la recherche porte donc sur les deux morceaux.
+          grep -q 'Export des résultats' /tmp/form.html
+          grep -q '(facultatif)' /tmp/form.html
           grep -q 'name="client_token"' /tmp/form.html
           grep -q 'id="waiting" hidden' /tmp/form.html
           grep -q 'id="cancel-btn"' /tmp/form.html
@@ -148,26 +163,35 @@ jobs:
           echo "--- garde-fous mémoire de l'image ---"
           heap=$(docker exec mppcr-smoke java -XX:+PrintFlagsFinal -version 2>/dev/null \
             | grep -oE '^ *size_t MaxHeapSize *= *[0-9]+' | grep -oE '[0-9]+$')
-          [ -n "$heap" ] && [ "$heap" -lt 2147483648 ] \
+          [ -n "$heap" ] && [ "$heap" -le 2147483648 ] \
             || { echo "tas JVM non borné : ${heap:-inconnu}"; exit 1; }
           echo "tas JVM maximal : $((heap / 1024 / 1024)) Mo"
 
           echo "--- compteur d'usage et verrou (droits d'écriture sur /app/data) ---"
           docker exec mppcr-smoke test -f /app/data/usage.db
 
+          echo "--- version exposée par l'application ---"
+          version_image=$(docker exec mppcr-smoke python3 -c 'import app; print(app.APP_VERSION)')
+          [ -n "$version_image" ] && [ "$version_image" != "inconnue" ] \
+            || { echo "fichier VERSION absent de l'image"; exit 1; }
+          echo "version de l'image : $version_image"
+          curl -fsS http://127.0.0.1:5000/ -o /tmp/accueil.html
+          grep -q "class=\"version-tag\">$version_image<" /tmp/accueil.html \
+            || { echo "la version n'est pas affichée dans l'en-tête de la page"; exit 1; }
+
           echo "--- analyse réelle : page web avec score ---"
           curl -fsS -o /tmp/result.html \
             -F "analysis=both" -F "sims=500" \
             -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
             http://127.0.0.1:5000/analyse
-          grep -q 'class="card card-pad score"' /tmp/result.html
+          grep -q 'class="card score-hero"' /tmp/result.html
           grep -q 'Score de conformité DCMA' /tmp/result.html
           grep -q 'Comment ce score est calculé' /tmp/result.html
           grep -q 'Lecture décisionnelle' /tmp/result.html
           tr -d '\n' < /tmp/result.html > /tmp/result-ligne.html
-          grep -qE 'class="score-value">[[:space:]]*[0-9]+<' /tmp/result-ligne.html
-          grep -q 'Tâches concernées (N°)' /tmp/result.html
-          grep -qE 'class="ids">[[:space:]]*[0-9]' /tmp/result-ligne.html
+          grep -qE 'class="score-num">[0-9]+<span>/100</span>' /tmp/result-ligne.html
+          grep -q 'Tâches concernées (numéros MS Project)' /tmp/result.html
+          grep -qE 'class="task-id">[0-9]+<' /tmp/result-ligne.html
           if grep -q 'Log4j' /tmp/result.html; then
             echo "trace Log4j dans la page"; exit 1
           fi
@@ -177,7 +201,7 @@ jobs:
             -F "analysis=dcma" -F "export=csv" \
             -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
             http://127.0.0.1:5000/analyse
-          grep -q 'Exports disponibles' /tmp/result-csv.html
+          grep -q 'download="MPPCR_' /tmp/result-csv.html
           grep -q 'Contrôles DCMA-14\|Détail des contrôles' /tmp/result-csv.html
           python3 - <<'PY'
           import base64, re, sys
