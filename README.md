@@ -1,17 +1,5 @@
 # MPPCR — MS Project Check & Risk
 
-<img width="1125" height="673" alt="image" src="https://github.com/user-attachments/assets/ef742eae-10bc-40b8-9d4b-7e18c8bc8b3b" />
-
-
-
-
-
-**Simulation Monte Carlo**
-<img width="1095" height="767" alt="image" src="https://github.com/user-attachments/assets/f28ac795-950d-425d-9745-e9e5c787edb2" />
-
-
-
-
 Analyse qualité et analyse de risque de plannings MS Project (`.mpp`), exposées
 dans une interface web simple.
 
@@ -42,16 +30,18 @@ téléchargée, aucune CDN) :
 
 1. **Analyser un planning** — trois étapes numérotées : le fichier (zone de
    dépôt), le type d'analyse (DCMA-14, Monte Carlo, ou les deux), les options.
-   Un panneau latéral rappelle le fichier choisi, l'analyse et les exports
-   demandés, affiche le quota du jour et porte le bouton de lancement.
+   Un panneau latéral rappelle le fichier choisi, l'analyse, les exports et la
+   répartition par lot demandés, affiche le quota du jour et porte le bouton de
+   lancement.
 2. **Résultat** — un en-tête (fichier, date d'état, faits marquants, boutons
    d'export et d'impression), le **score de conformité** avec sa bande et ses
    repères, cinq compteurs de contrôles, un bandeau d'alerte quand un point est
    bloquant, puis les **priorités d'amélioration** (volet dépliable par écart :
    action recommandée et numéros de tâches concernés) et le **détail des
    14 contrôles**. La simulation Monte Carlo suit dans la même page :
-   P50 / P80 / P90, axe des percentiles, lecture décisionnelle et indice de
-   criticité par tâche.
+   P50 / P80 / P90, axe des percentiles, lecture décisionnelle, indice de
+   criticité par tâche et, si elle a été demandée, répartition du risque par lot
+   WBS (voir [Répartition par macro-tâche](#répartition-par-macro-tâche-monte-carlo)).
 3. **Erreur** — fichier refusé, quota atteint, analyse interrompue ou échec de
    lecture, avec le motif et le retour au formulaire.
 
@@ -253,20 +243,13 @@ tous statuts confondus ».
 
 ### Évolutions envisagées (non implémentées)
 
-1. **Tableau par macro-tâche de niveau 1** (les « programmes ») : reste-à-faire
-   P50, fin prévisionnelle P50/P80 et incertitude (P80 − P50) par programme. Les
-   briques nécessaires existent : `Task.getOutlineLevel()` pour repérer les
-   programmes, `Task.getParentTask()` pour y rattacher chaque tâche de détail (les
-   détails hors programme iraient dans un seau « hors programme »), et
-   `ProjectCalendar.getDate()` pour convertir des jours ouvrés en date réelle, en
-   sautant week-ends et jours fériés. L'implémentation consiste à ajouter, par
-   simulation, l'étendue de chaque programme (`min` des débuts → `max` des fins de
-   ses tâches de détail) : **une passe linéaire sur les tâches**, soit environ 10 %
-   du temps de calcul, le poste dominant restant le tirage PERT par tâche. Se
-   limiter au niveau 1 garde le tableau petit (N simulations × nombre de
-   programmes). Restent à trancher : colonnes exactes, affichage des programmes
-   sans travail restant, cas d'un planning sans date d'état, et présence ou non
-   dans les exports CSV/Excel.
+1. **Reste-à-faire et fin prévisionnelle par lot** : la répartition par lot est
+   livrée (voir [Répartition par macro-tâche](#répartition-par-macro-tâche-monte-carlo)),
+   mais elle exprime encore des **durées**, pas des dates : ni le reste-à-faire ni
+   la fin prévisionnelle ne sont calculés par lot. Les briques existent
+   (`ProjectCalendar.getDate()` pour convertir des jours ouvrés en date réelle, en
+   sautant week-ends et jours fériés) ; c'est la même question de fond que le point
+   suivant.
 2. **Bascule en « durée restante / fin prévisionnelle »** : aujourd'hui la
    simulation affiche la durée **totale depuis le jour 0**, passé compris, et
    n'utilise ni la date d'état ni `Task.getRemainingDuration()`. Pour un planning
@@ -336,7 +319,7 @@ dans l'en-tête de la page de résultat. Un export non demandé y reste visible
 
 | Export | Contenu |
 | --- | --- |
-| **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : score, synthèse, contrôles, priorités, Monte Carlo, criticité, sorties brutes |
+| **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : score, synthèse, contrôles, priorités, Monte Carlo, criticité, répartition par lot si demandée, sorties brutes |
 | **Excel** | une feuille par analyse lancée (« Contrôles DCMA-14 », « Monte Carlo »), verdicts colorés, score en tête |
 
 Les fichiers sont produits dans la même requête que l'affichage et **encodés dans
@@ -522,7 +505,15 @@ subprocess par `app.py`, qui met en forme leurs sorties. Ils utilisent `mpxj` et
 ### Répartition par macro-tâche (Monte Carlo)
 
 `montecarlo.py` simule toujours au niveau **détail**, là où vit la vraie structure
-de dépendances, mais il peut restituer le risque **par lot WBS** :
+de dépendances, mais il peut restituer le risque **par lot WBS**.
+
+**Dans l'interface** : volet « Options avancées Monte Carlo » du formulaire, champ
+**« Répartition du risque par lot (facultatif) »** — la liste fixe `Aucune`,
+`Niveau 1`, `Niveau 2`, `Niveau 3`. Le résultat s'ajoute sous l'indice de
+criticité, sous forme d'un tableau **lot / P50 / P80 / P90 / écart P50 vs planifié
+/ criticité**, et rejoint les exports CSV et Excel.
+
+**En ligne de commande** :
 
 ```bash
 # Répartition par programme (tâches récapitulatives de niveau 1)
@@ -556,14 +547,24 @@ Repartition par macro-tache (niveau 1) :
 - Les tâches de détail qui ne dépendent d'aucune récapitulative du niveau demandé
   sont regroupées sous **« Tâches hors lot »**, pour que la vue reste complète.
 - Si le niveau demandé n'existe pas, le script le dit et liste les niveaux
-  disponibles (`Aucune tache recapitulative au niveau 9 -- niveaux disponibles : [1]`)
-  plutôt que d'afficher une section vide.
-- **Limite connue** : les liens portés par une tâche **récapitulative** ne sont pas
-  propagés à ses tâches de détail, puisque le graphe ne contient que les détails.
-  Un planning qui enchaîne ses lots par des liens de niveau récapitulatif est donc
-  simulé avec des lots démarrant trop tôt ; la vue par macro-tâche rend ce défaut
-  visible (un lot peut finir avant son prédécesseur). Ranger les liens sur les
-  tâches de détail, comme le fait MS Project dans un planning piloté, l'évite.
+  disponibles (`Aucune tache recapitulative au niveau 9 -- niveaux disponibles : [1]`),
+  et la page l'explique au lieu d'afficher un tableau vide.
+- **Limite connue** : les liens portés par une tâche **récapitulative** ne sont
+  pas propagés à ses tâches de détail, puisque le graphe ne contient que les
+  détails — détail ci-dessous.
+
+#### Liens portés par une tâche récapitulative
+
+Un planning **ne doit pas** en contenir : les liens relient des tâches de détail.
+Comme la simulation ne retient que ces dernières, un tel lien est **ignoré** — un
+lot peut alors finir avant son prédécesseur. MPPCR ne corrige pas le réseau : il
+**signale** le cas, avec le nombre de liens et des exemples
+(`Phase 1 — Conception -> Phase 2 — Réalisation`), dans un bandeau d'avertissement
+au-dessus du tableau par lot.
+
+L'avertissement n'est produit **qu'avec la répartition par lot** (c'est la vue où
+le phénomène se voit) : sans l'option, la sortie du script est inchangée, au
+caractère près, et la référence figée des tests reste valable.
 
 ## Contrôles et tests
 
@@ -571,9 +572,9 @@ Trois vérifications, à lancer avant toute publication :
 
 | Vérification | Portée | Volume |
 | --- | --- | --- |
-| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports, mémoire, non-régression des sorties de référence | 293 |
-| `alignment_check.py` | feuille de style de la maquette reprise **verbatim**, jetons, classes, structure des écrans | 188 |
-| `verify_prod.sh` | production réelle : conteneur, HTTP, exports, refus, charge, absence de résidu | 53 |
+| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports, mémoire, répartition par lot, non-régression des sorties de référence | 320 |
+| `alignment_check.py` | feuille de style de la maquette reprise **verbatim**, jetons, classes, structure des écrans | 190 |
+| `verify_prod.sh` | production réelle : conteneur, HTTP, répartition par lot, exports, refus, charge, absence de résidu | 62 |
 
 Les deux premières tournent **dans l'image de production** (seul environnement qui
 embarque Flask, JPype, MPXJ et Java) : `lancer_lxc.sh` y copie le code de staging
