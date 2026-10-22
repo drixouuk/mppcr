@@ -19,6 +19,7 @@ avant toute exposition sur Internet.
 
 import base64
 import csv
+import gzip
 import io
 import logging
 import math
@@ -127,6 +128,28 @@ def exiger_authentification():
         401,
         {"WWW-Authenticate": 'Basic realm="MPPCR", charset="UTF-8"'},
     )
+
+
+# Compression des pages HTML volumineuses : la page de résultat embarque ses
+# exports (data:) et peut dépasser le mégaoctet. Le HTML et le CSV encodé se
+# compressent bien ; le PDF et le classeur, déjà compressés, peu.
+TAILLE_MIN_COMPRESSION = 20 * 1024
+
+
+@app.after_request
+def compresser(response):
+    if (response.status_code != 200 or response.direct_passthrough
+            or response.mimetype != "text/html"
+            or "Content-Encoding" in response.headers
+            or "gzip" not in (request.headers.get("Accept-Encoding") or "").lower()):
+        return response
+    contenu = response.get_data()
+    if len(contenu) < TAILLE_MIN_COMPRESSION:
+        return response
+    response.set_data(gzip.compress(contenu, compresslevel=6))
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers.add("Vary", "Accept-Encoding")
+    return response
 
 
 @app.after_request

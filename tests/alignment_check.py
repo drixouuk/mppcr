@@ -32,6 +32,9 @@ ADDED = {
     "charts-grid", "chart-card", "chart", "chart-grid", "chart-axis", "chart-bar",
     "chart-col", "chart-hit", "chart-mark", "chart-line", "chart-area", "chart-dot",
     "chart-pt", "chart-table",
+    # v1.15 : synthèse, sous-navigation fixe, dates sous les cartes, dépôt compact.
+    "synth", "synth-item", "synth-lab", "synth-val", "synth-sub", "synth-act",
+    "subnav-fixe", "d-date", "dz-compact", "crit-group",
 }
 
 FAILS, COUNT = [], [0]
@@ -210,7 +213,7 @@ check("résultat : en-tête avec retour, puce fichier, date d'état et faits",
       and 'class="meta-chip"' in res and 'class="meta-chips"' in res)
 check("résultat : actions d'en-tête (exports + impression)",
       'class="head-actions"' in res and 'id="print-btn"' in res
-      and "Imprimer / PDF" in res and 'download="{{ d.filename }}"' in res)
+      and "Imprimer la page" in res and 'download="{{ d.filename }}"' in res)
 check("résultat : héros de score de la maquette",
       'class="card score-hero"' in res and "score-hero-inner" in res
       and 'class="score-left' in res and 'class="score-num"' in res
@@ -227,7 +230,8 @@ check("résultat : bandeaux d'alerte de la maquette",
       'class="alert alert-danger"' in res and 'class="alert alert-warn"' in res
       and 'class="alert alert-info"' in res and 'class="alert-action"' in res)
 check("résultat : sous-navigation par ancres (diag / mc)",
-      'class="subnav"' in res and 'href="#diag"' in res and 'href="#mc"' in res)
+      'class="subnav' in res and "('diag', " in res and "('mc', " in res
+      and 'href="#{{ ancre }}"' in res)
 check("résultat : priorités en volets dépliables de la maquette",
       '<details class="prio"' in res and 'class="prio-rank' in res
       and 'class="prio-name"' in res and 'class="prio-metric"' in res

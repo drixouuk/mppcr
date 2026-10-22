@@ -94,12 +94,12 @@ grep -q 'class="card score-hero"' "$WORK/result.html"; check "$(res $?)" "héros
 grep -q 'class="band-badge' "$WORK/result.html"; check "$(res $?)" "bande de verdict du score"
 check "$([ "$(grep -o 'class="kpi' "$WORK/result.html" | wc -l)" = "6" ] && echo 1 || echo 0)" \
   "cinq cartes KPI (plus le conteneur)" "n=$(grep -o 'class=.kpi' "$WORK/result.html" | wc -l)"
-grep -q 'class="subnav"' "$WORK/result.html"; check "$(res $?)" "sous-navigation DCMA / Monte Carlo"
+grep -q 'class="subnav subnav-fixe"' "$WORK/result.html"; check "$(res $?)" "sous-navigation fixe des sections"
 grep -q '<details class="prio"' "$WORK/result.html"; check "$(res $?)" "priorités en volets dépliables"
 grep -q 'class="card table-card"' "$WORK/result.html"; check "$(res $?)" "tableau des contrôles (maquette v2)"
 grep -q 'class="dur-card reco"' "$WORK/result.html"; check "$(res $?)" "P80 mis en avant"
 grep -q 'class="card axis-card"' "$WORK/result.html"; check "$(res $?)" "axe des percentiles"
-grep -q 'id="print-btn"' "$WORK/result.html"; check "$(res $?)" "bouton Imprimer / PDF"
+grep -q 'id="print-btn"' "$WORK/result.html"; check "$(res $?)" "bouton Imprimer la page"
 grep -q 'Tâches concernées (numéros MS Project)' "$WORK/result.html"
 check "$(res $?)" "tâches concernées listées dans les priorités"
 tr -d '\n' < "$WORK/result.html" | grep -qE 'class="task-id">[0-9]+<'

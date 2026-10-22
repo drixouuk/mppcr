@@ -27,6 +27,24 @@ Les versions antérieures à la v1.6.0 sont documentées dans les
 - Scripts d'enquête ponctuels rangés dans `tests/enquetes/` ; `lancer_lxc.sh`
   envoie tout le dossier `tests/`.
 
+### Ergonomie
+- **Bandeau de synthèse** en tête du résultat : score, fin prévisionnelle P80
+  datée, nombre d'écarts, première action.
+- **Dates de fin sous chaque carte** P50 / P80 / P90 (et CPM), au lieu d'un bloc
+  séparé qui répétait les mêmes percentiles.
+- **Sous-navigation fixe** Synthèse / Évolution / Diagnostic / Monte Carlo ;
+  tableau des 14 contrôles replié quand des priorités existent ; doublon du lien
+  « Comment ce score est calculé » retiré.
+- Sensibilité avant la criticité ; tâches toujours critiques regroupées en une
+  ligne.
+- Formulaire : mention « analyse chiffrée » (inexacte) remplacée ; zone de dépôt
+  pour la version précédente ; le récapitulatif annonce corrélation et coût d'une
+  comparaison (2 analyses). Bouton « Imprimer la page » (distinct du rapport PDF).
+- Mobile : pastilles d'en-tête insécables, 5e carte KPI sur toute la largeur,
+  onglets défilants.
+- **Compression gzip** des pages HTML de plus de 20 Ko (résultat avec exports :
+  124 Ko -> 42 Ko).
+
 ### Corrigé
 - **Décalages en %** : convertis comme une durée (« 500 % » donnait 1,04 j) ; ils
   valent désormais la part correspondante de la durée du prédécesseur.

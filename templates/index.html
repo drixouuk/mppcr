@@ -39,7 +39,14 @@
           </div>
           <div class="field" style="margin-top:14px">
             <label for="mpp_file_prev">Comparer avec une version précédente <span style="font-weight:400;color:var(--text-3)">(facultatif)</span></label>
-            <input type="file" id="mpp_file_prev" name="mpp_file_prev" accept=".mpp">
+            <div class="dropzone dz-compact" id="drop-prev">
+              <input type="file" id="mpp_file_prev" name="mpp_file_prev" accept=".mpp">
+              <div class="dz-title"><b>Ajoutez l’ancienne version</b> du planning (.mpp)</div>
+              <div class="dz-file" id="dz-prev-file" hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span id="dz-prev-label"></span>
+              </div>
+            </div>
             <p class="small muted" style="margin-top:6px">Même analyse sur l’ancienne version : évolution du score, des contrôles, des percentiles et de la criticité. Compte pour deux analyses du quota.</p>
           </div>
         </div>
@@ -178,7 +185,7 @@
             {% endif %}
             <div class="confid">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Analyse chiffrée et exécutée localement, sans conservation.
+              Analyse exécutée sur ce serveur, aucun fichier conservé.
             </div>
           </div>
         </div>
@@ -270,18 +277,38 @@
       var exports = [].slice.call(form.querySelectorAll('input[name="export"]:checked'))
         .map(function (c) { return { xlsx: "Excel", pdf: "PDF" }[c.value] || "CSV"; });
       var macro = document.getElementById("macro");
+      var correlation = document.getElementById("correlation");
+      var precedent = document.getElementById("mpp_file_prev");
       var parties = [];
       if (coche && coche.value !== "dcma" && sims) {
         parties.push(sims.options[sims.selectedIndex].text.split(" (")[0] + " simulations");
         if (macro && macro.value) {
           parties.push("par lot (niveau " + macro.value + ")");
         }
+        if (correlation && correlation.value) {
+          parties.push("corrélation " + correlation.value.replace(".", ","));
+        }
       }
       parties.push(exports.length ? "export " + exports.join(" + ") : "aucun export");
+      if (precedent && precedent.files && precedent.files.length) {
+        parties.push("comparaison : compte pour 2 analyses");
+      }
       if (ctaOpts) ctaOpts.textContent = parties.join(" · ");
     }
 
     input.addEventListener("change", showFile);
+
+    // Version précédente : même retour visuel que la zone principale.
+    var precedentInput = document.getElementById("mpp_file_prev");
+    var precedentChip = document.getElementById("dz-prev-file");
+    var precedentLabel = document.getElementById("dz-prev-label");
+    if (precedentInput) {
+      precedentInput.addEventListener("change", function () {
+        var fichier = precedentInput.files && precedentInput.files.length ? precedentInput.files[0] : null;
+        if (precedentChip) precedentChip.hidden = !fichier;
+        if (precedentLabel) precedentLabel.textContent = fichier ? fichier.name + " · " + taille(fichier.size) : "";
+      });
+    }
     form.addEventListener("change", showOptions);
     showOptions();
 

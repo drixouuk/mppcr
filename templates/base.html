@@ -543,6 +543,42 @@ main .view{display:block}
   white-space:pre-wrap;overflow-x:auto;max-height:340px;margin-top:6px;
 }
 
+/* Bandeau de synthèse en tête du résultat : l'essentiel d'un coup d'œil
+   (score, fin prévisionnelle, écarts, première action), avant le détail. */
+.synth{display:grid;grid-template-columns:1fr 1fr 1fr 2fr;margin-top:18px;overflow:hidden}
+.synth-item{padding:16px 18px;border-left:1px solid var(--border)}
+.synth-item:first-child{border-left:none}
+.synth-lab{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+.synth-val{font-size:24px;font-weight:750;color:var(--text);margin-top:6px;line-height:1.15}
+.synth-val small{font-size:13px;font-weight:600;color:var(--text-3)}
+.synth-sub{font-size:12.5px;color:var(--text-2);margin-top:4px}
+.synth-act{font-size:13.5px;font-weight:650;color:var(--text);margin-top:6px}
+@media (max-width:960px){.synth{grid-template-columns:1fr 1fr}
+  .synth-item:nth-child(3){border-left:none}
+  .synth-item:nth-child(n+3){border-top:1px solid var(--border)}}
+@media (max-width:640px){.synth{grid-template-columns:1fr}
+  .synth-item{border-left:none}.synth-item+.synth-item{border-top:1px solid var(--border)}}
+
+/* Sous-navigation des sections du résultat : reste visible sous l'en-tête
+   pendant la lecture d'une page longue ; les ancres tiennent compte de sa
+   hauteur. */
+.subnav.subnav-fixe{position:sticky;top:60px;z-index:40;background:var(--bg);margin-top:18px}
+.subnav.subnav-fixe{overflow-x:auto;scrollbar-width:none}
+.subnav.subnav-fixe a{white-space:nowrap}
+[id]{scroll-margin-top:120px}
+
+/* Date de fin prévisionnelle sous chaque carte de durée Monte Carlo. */
+.d-date{font-size:12.5px;color:var(--text-2);margin-top:6px;font-weight:600}
+
+/* Zone de dépôt secondaire (version précédente), même composant en compact. */
+.dropzone.dz-compact{padding:16px 20px}
+.dz-compact .dz-title{font-size:13.5px}
+
+/* Mobile : les pastilles ne se coupent pas au milieu, et la 5e carte KPI
+   occupe toute la ligne plutôt que de rester seule à gauche. */
+.meta-chip{white-space:nowrap}
+@media(max-width:640px){.kpis .kpi:last-child:nth-child(odd){grid-column:1/-1}}
+
 /* Graphiques de distribution : histogramme et courbe en S en SVG
    rendu côté serveur. Série unique en --primary (validée : contraste 3:1 sur
    la surface), grille et axes en filets d'un pas au-dessus de la surface,

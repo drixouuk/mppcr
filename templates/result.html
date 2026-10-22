@@ -104,10 +104,71 @@
         {% endfor %}
         <button class="btn btn-ghost btn-sm" type="button" id="print-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-          Imprimer / PDF
+          Imprimer la page
         </button>
       </div>
     </div>
+
+    {# ==================== SYNTHÈSE ==================== #}
+    {% set s0 = dcma.score if dcma else None %}
+    {% set prem = (dcma.priorities[0] if dcma and dcma.priorities else None) %}
+    {% set fc_p80 = ((mc.forecast.rows if mc and mc.forecast else [])|selectattr('key', 'equalto', 'p80')|list|first) if mc else None %}
+    {% set mc_p80 = ((mc.metrics if mc else [])|selectattr('key', 'equalto', 'p80')|list|first) if mc else None %}
+    {% if dcma or mc %}
+      <div class="card synth" id="synthese">
+        <div class="synth-item">
+          <div class="synth-lab">Score de conformité</div>
+          {% if s0 and s0.score is not none %}
+            <div class="synth-val">{{ s0.score }}<small>/100</small></div>
+            <div class="synth-sub">{{ s0.label }}</div>
+          {% else %}
+            <div class="synth-val">—</div><div class="synth-sub">{{ 'non évaluable' if dcma else 'diagnostic non demandé' }}</div>
+          {% endif %}
+        </div>
+        <div class="synth-item">
+          <div class="synth-lab">Fin prévisionnelle (P80)</div>
+          {% if fc_p80 %}
+            <div class="synth-val" style="color:var(--ok)">{{ fc_p80.date_fr }}</div>
+            <div class="synth-sub">{{ '%.1f'|format(fc_p80.days)|replace('.', ',') }} j ouvrés restants</div>
+          {% elif mc_p80 and mc_p80.value_num is not none %}
+            <div class="synth-val">{{ '%.1f'|format(mc_p80.value_num)|replace('.', ',') }}<small> j</small></div>
+            <div class="synth-sub">durée totale (pas de date d’état)</div>
+          {% else %}
+            <div class="synth-val">—</div><div class="synth-sub">{{ 'simulation arrêtée' if mc else 'simulation non demandée' }}</div>
+          {% endif %}
+        </div>
+        <div class="synth-item">
+          <div class="synth-lab">À corriger</div>
+          {% if dcma %}
+            <div class="synth-val" style="color:{{ 'var(--ko)' if dcma.kpi.ko else 'var(--ok)' }}">{{ dcma.kpi.ko }}</div>
+            <div class="synth-sub">contrôle{{ 's' if dcma.kpi.ko > 1 else '' }} en écart sur {{ dcma.kpi.total }}</div>
+          {% else %}
+            <div class="synth-val">—</div><div class="synth-sub">diagnostic non demandé</div>
+          {% endif %}
+        </div>
+        <div class="synth-item">
+          <div class="synth-lab">Première action</div>
+          {% if prem %}
+            <div class="synth-act">{{ names.get(prem.num, prem.name) }}</div>
+            <div class="synth-sub">{{ prem.comment|truncate(150, true, '…') }}</div>
+          {% elif mc and mc.decision %}
+            <div class="synth-sub" style="margin-top:6px">{{ mc.decision|truncate(170, true, '…') }}</div>
+          {% else %}
+            <div class="synth-sub" style="margin-top:6px">Aucune action prioritaire.</div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% set sections = [('synthese', 'Synthèse')] %}
+    {% if comparaison %}{% set sections = sections + [('compare', 'Évolution')] %}{% endif %}
+    {% if has_dcma %}{% set sections = sections + [('diag', 'Diagnostic DCMA-14')] %}{% endif %}
+    {% if has_mc %}{% set sections = sections + [('mc', 'Monte Carlo')] %}{% endif %}
+    {% if sections|length > 2 %}
+      <nav class="subnav subnav-fixe" aria-label="Sections du résultat">
+        {% for ancre, titre in sections %}<a href="#{{ ancre }}"{% if loop.first %} class="active"{% endif %}>{{ titre }}</a>{% endfor %}
+      </nav>
+    {% endif %}
 
     {# ==================== COMPARAISON AVEC UNE VERSION PRÉCÉDENTE ==================== #}
     {% if comparaison_erreur %}
@@ -239,7 +300,6 @@
               {%- else -%}
                 Aucun contrôle conforme ou en écart : le score n’est pas calculable.
               {%- endif %}
-              <a href="#methode-score" style="color:var(--primary);font-weight:600;text-decoration:none">Comment ce score est calculé ↗</a>
             </p>
           </div>
         </div>
@@ -286,13 +346,6 @@
       {% endif %}
     {% endif %}
 
-    <!-- Sub-nav résultats -->
-    {% if has_mc %}
-      <div class="subnav">
-        <a href="#diag" class="active">Diagnostic DCMA-14</a>
-        <a href="#mc">Monte Carlo</a>
-      </div>
-    {% endif %}
 
     {% if p.rows %}
       <!-- Priorités -->
@@ -344,6 +397,12 @@
         </span>
       </div>
 
+      <details class="opt"{{ ' open' if not p.priorities else '' }}>
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          Afficher le tableau des {{ p.rows|length }} contrôles
+          <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
       <div class="card table-card">
         <div class="table-scroll">
           <table class="ctrl">
@@ -377,6 +436,7 @@
           </table>
         </div>
       </div>
+      </details>
     {% else %}
       <div class="alert alert-warn">
         <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -451,7 +511,11 @@
 
     {% if exploitable %}
       {% if p.metrics %}
-        <div class="mc-durations" style="margin-top:16px">
+        {% set fc_rows = p.forecast.rows if p.forecast else [] %}
+        {% if fc_rows %}
+          <p class="small muted" style="margin-top:14px">Dates de fin : reste à faire simulé depuis la date d’état du {{ p.forecast.status_date[8:10] }}/{{ p.forecast.status_date[5:7] }}/{{ p.forecast.status_date[0:4] }}, sur le calendrier du projet.</p>
+        {% endif %}
+        <div class="mc-durations" style="margin-top:{{ '8px' if fc_rows else '16px' }}">
           {% for m in [d.det, d.p50, d.p80, d.p90] if m and m.value_num is not none %}
             {% set est_reco = (m.key == 'p80') %}
             <div class="dur-card{{ ' ref' if m.key == 'deterministic' else '' }}{{ ' reco' if est_reco else '' }}">
@@ -472,6 +536,8 @@
                   {{ m.target or '—' }}
                 {%- endif -%}
               </div>
+              {% set fc = fc_rows|selectattr('key', 'equalto', 'plan' if m.key == 'deterministic' else m.key)|list|first %}
+              {% if fc %}<div class="d-date">Fin le {{ fc.date_fr }} · {{ '%.1f'|format(fc.days)|replace('.', ',') }} j restants</div>{% endif %}
             </div>
           {% endfor %}
         </div>
@@ -511,10 +577,37 @@
         {% endif %}
       {% endif %}
 
+      {% if p.sensitivity %}
+        <div class="sec-title"><h2>Sensibilité des tâches</h2><span class="count">corrélation durée / fin de projet</span></div>
+        <div class="card crit-list">
+          {% for s in p.sensitivity %}
+            <div class="crit-row">
+              <span class="crit-id" title="{{ s.name }}">{{ s.name }}</span>
+              <div class="crit-bar"><div class="crit-fill{{ ' hot' if s.value >= 0.5 }}" style="width:{{ s.width }}%"></div></div>
+              <span class="crit-val">{{ '%+.2f'|format(s.value)|replace('.', ',') }}</span>
+            </div>
+          {% endfor %}
+          <div class="crit-note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            Les tâches en tête pèsent le plus sur la date de fin : c’est là qu’une estimation affinée ou un plan de réduction du risque rapporte le plus.
+          </div>
+        </div>
+      {% endif %}
+
       {% if p.criticality %}
+        {% set toujours = p.criticality|selectattr('pct_num', 'ge', 99.95)|list %}
+        {% set grouper = toujours|length >= 3 %}
         <div class="sec-title"><h2>Indice de criticité par tâche</h2><span class="count">% sur le chemin critique</span></div>
         <div class="card crit-list">
-          {% for c in p.criticality %}
+          {% if grouper %}
+            <div class="crit-row crit-group">
+              <span class="crit-id" title="{{ toujours|map(attribute='name')|join(', ') }}"><b>{{ toujours|length }} tâches toujours critiques</b></span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100%"></div></div>
+              <span class="crit-val">100 %</span>
+            </div>
+            <p class="small muted" style="margin:2px 0 8px;padding:0 24px">{{ toujours|map(attribute='name')|join(' · ') }}</p>
+          {% endif %}
+          {% for c in p.criticality if not (grouper and c.pct_num >= 99.95) %}
             <div class="crit-row">
               <span class="crit-id" title="{{ c.name }}">{{ c.name }}</span>
               <div class="crit-bar"><div class="crit-fill{{ ' hot' if c.css == 'high' }}" style="width:{{ c.width }}%"></div></div>
@@ -533,33 +626,11 @@
        sensibilité (tornado) et distribution des durées simulées. Composants de
        la maquette (cartes de durée, barres de criticité) ; seuls les deux
        graphiques SVG sont des ajouts du rendu serveur. #}
-    {% if exploitable and p.forecast %}
-      <div class="sec-title">
-        <h2>Fin prévisionnelle</h2>
-        {% if p.forecast.status_date %}<span class="count">depuis la date d’état du {{ p.forecast.status_date[8:10] }}/{{ p.forecast.status_date[5:7] }}/{{ p.forecast.status_date[0:4] }}</span>{% endif %}
-        <span class="right small muted">Reste à faire simulé, calendrier du projet</span>
+    {% if exploitable and p.forecast and not p.forecast.rows %}
+      <div class="alert alert-info">
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <span><b>Fin prévisionnelle indisponible</b> — le planning n’a pas de date d’état : renseignez-la pour obtenir le reste à faire et les dates de fin.</span>
       </div>
-      {% if p.forecast.rows %}
-        <div class="mc-durations">
-          {% for r in p.forecast.rows %}
-            <div class="dur-card{{ ' ref' if r.key == 'plan' else '' }}{{ ' reco' if r.key == 'p80' else '' }}">
-              <div class="d-label">
-                {%- if r.key == 'plan' %}Planifié (reste à faire)
-                {%- elif r.key == 'p50' %}P50 — Médiane
-                {%- elif r.key == 'p80' %}P80 — Objectif planning
-                {%- else %}P90 — Prudent{% endif -%}
-              </div>
-              <div class="d-val"{% if r.key == 'p80' %} style="color:var(--ok)"{% endif %}>{{ r.date_fr }}</div>
-              <div class="d-delta d-ref">{{ '%.1f'|format(r.days)|replace('.', ',') }} j ouvrés restants</div>
-            </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="alert alert-info">
-          <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          <span><b>Prévision indisponible</b> — le planning n’a pas de date d’état : renseignez-la pour obtenir le reste à faire et les dates de fin.</span>
-        </div>
-      {% endif %}
     {% endif %}
 
     {% if exploitable and p.charts %}
@@ -624,23 +695,6 @@
           </table>
         </div>
       </details>
-    {% endif %}
-
-    {% if exploitable and p.sensitivity %}
-      <div class="sec-title"><h2>Sensibilité des tâches</h2><span class="count">corrélation durée / fin de projet</span></div>
-      <div class="card crit-list">
-        {% for s in p.sensitivity %}
-          <div class="crit-row">
-            <span class="crit-id" title="{{ s.name }}">{{ s.name }}</span>
-            <div class="crit-bar"><div class="crit-fill{{ ' hot' if s.value >= 0.5 }}" style="width:{{ s.width }}%"></div></div>
-            <span class="crit-val">{{ '%+.2f'|format(s.value)|replace('.', ',') }}</span>
-          </div>
-        {% endfor %}
-        <div class="crit-note">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          Les tâches en tête pèsent le plus sur la date de fin : c’est là qu’une estimation affinée ou un plan de réduction du risque rapporte le plus.
-        </div>
-      </div>
     {% endif %}
 
     {# Répartition facultative du risque par lot WBS (`--macro-level N`) : la

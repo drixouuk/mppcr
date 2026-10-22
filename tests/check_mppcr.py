@@ -712,7 +712,7 @@ check("page : boutons d'export de l'en-tête (CSV + Excel)",
       'class="head-actions"' in html_dl and html_dl.count('<a class="btn btn-ghost btn-sm"') == 2
       and html_dl.count('download="MPPCR_RL_') == 2)
 check("page : bouton d'impression / PDF", 'id="print-btn"' in html_dl
-      and "Imprimer / PDF" in html_dl and "window.print()" in html_dl)
+      and "Imprimer la page" in html_dl and "window.print()" in html_dl)
 check("page : seul le rapport PDF reste inerte quand CSV et Excel sont demandés",
       html_dl.count('<span class="btn btn-ghost btn-sm"') == 1)
 with app.app.test_request_context("/"):
@@ -1488,6 +1488,46 @@ finally:
     app.AUTH_USERS = _comptes_avant
 check("auth : désactivée par défaut", client.get("/").status_code == 200)
 check("auth : configuration illisible -> aucun compte", app.lire_comptes("sans-separateur, :x") == {})
+
+
+# --------------------------------------------------------------------------
+section("v1.15 : ergonomie (synthèse, dates, navigation, compression)")
+
+if "_brut" in globals():
+    _faux_mc = _brut
+    _faux_dcma = (STAGE / "ref_dcma.txt").read_text(encoding="utf-8")
+    _vrai = app.run_script
+    try:
+        app.run_script = lambda cmd, label, token=None: _faux_dcma if "DCMA" in label else _faux_mc
+        _r = client.post("/analyse", data={
+            "analysis": "both", "mpp_file": (io.BytesIO(b"x"), "planning.mpp")},
+            content_type="multipart/form-data", headers={"X-Forwarded-For": "203.0.113.170"})
+        _ux = _html.unescape(_r.get_data(as_text=True))
+        _rz = client.post("/analyse", data={
+            "analysis": "both", "export": ["csv", "xlsx", "pdf"], "mpp_file": (io.BytesIO(b"x"), "planning.mpp")},
+            content_type="multipart/form-data",
+            headers={"X-Forwarded-For": "203.0.113.171", "Accept-Encoding": "gzip"})
+    finally:
+        app.run_script = _vrai
+    check("synthèse : score, fin P80 datée, écarts et première action en tête",
+          'class="card synth"' in _ux and "Fin prévisionnelle (P80)" in _ux
+          and _ux.index('class="card synth"') < _ux.index('class="card score-hero"')
+          and "Première action" in _ux)
+    check("dates de fin sous les cartes Monte Carlo (4 cartes datées)",
+          _ux.count('class="d-date"') == 4, "=" + str(_ux.count('class="d-date"')))
+    check("sous-navigation fixe Synthèse / Diagnostic / Monte Carlo",
+          'class="subnav subnav-fixe"' in _ux and 'href="#synthese"' in _ux and 'href="#mc"' in _ux)
+    check("tableau des 14 contrôles replié quand des priorités existent",
+          "Afficher le tableau des 14 contrôles" in _ux)
+    check("sensibilité affichée avant la criticité, tâches toujours critiques regroupées",
+          _ux.index("Sensibilité des tâches") < _ux.index("Indice de criticité par tâche")
+          and "tâches toujours critiques" in _ux)
+    check("doublon « Comment ce score est calculé ↗ » retiré", "calculé ↗" not in _ux)
+    check("page compressée quand le navigateur accepte gzip",
+          _rz.headers.get("Content-Encoding") == "gzip" and "Accept-Encoding" in _rz.headers.get("Vary", ""))
+_accueil15 = client.get("/").get_data(as_text=True)
+check("formulaire : plus de mention « chiffrée », zone de dépôt pour la version précédente",
+      "chiffrée" not in _accueil15 and 'id="drop-prev"' in _accueil15)
 
 
 # --------------------------------------------------------------------------
