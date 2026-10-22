@@ -89,7 +89,10 @@
                 <input type="checkbox" name="export" id="e2" value="xlsx">
                 <span><span class="lbl">Excel (.xlsx)</span><br><span class="sub">Une feuille par analyse, verdicts colorés, score en tête</span></span>
               </div>
-              <p class="small muted" style="margin-top:10px">Pour un PDF : <b>Imprimer → Enregistrer au format PDF</b> depuis la page de résultat.</p>
+              <div class="check-row">
+                <input type="checkbox" name="export" id="e3" value="pdf">
+                <span><span class="lbl">Rapport PDF</span><br><span class="sub">Une page de synthèse pour un comité, puis les annexes détaillées</span></span>
+              </div>
             </div>
           </details>
 
@@ -265,7 +268,7 @@
       if (ctaMode) ctaMode.textContent = MODES[coche ? coche.value : "both"] || MODES.both;
       var sims = document.getElementById("sims");
       var exports = [].slice.call(form.querySelectorAll('input[name="export"]:checked'))
-        .map(function (c) { return c.value === "xlsx" ? "Excel" : "CSV"; });
+        .map(function (c) { return { xlsx: "Excel", pdf: "PDF" }[c.value] || "CSV"; });
       var macro = document.getElementById("macro");
       var parties = [];
       if (coche && coche.value !== "dcma" && sims) {

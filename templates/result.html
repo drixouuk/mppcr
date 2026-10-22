@@ -39,7 +39,7 @@
 {% block content %}
 {# Classes de la maquette v2 choisies selon le verdict (app.py, KIND_CSS). #}
 {% set rank_of = {'ko': 'pr-ko', 'na': 'pr-na', 'info': 'pr-warn'} %}
-{% set fmt_of = {'csv': 'CSV', 'xlsx': 'Excel'} %}
+{% set fmt_of = {'csv': 'CSV', 'xlsx': 'Excel', 'pdf': 'Rapport PDF'} %}
 {% set dl = downloads|default([], true) %}
 {% set exports_ok = dl|map(attribute='fmt')|list %}
 {# Libellés fournis par app.py (source unique, partagée avec les exports). #}
@@ -92,7 +92,7 @@
             {{ fmt_of.get(d.fmt, d.label) }}
           </a>
         {% endfor %}
-        {% for fmt in ['csv', 'xlsx'] if fmt not in exports_ok %}
+        {% for fmt in ['csv', 'xlsx', 'pdf'] if fmt not in exports_ok %}
           <span class="btn btn-ghost btn-sm" title="Cochez « {{ fmt_of[fmt] }} » dans le formulaire pour obtenir ce fichier avec l’analyse">
             {% if fmt == 'csv' %}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

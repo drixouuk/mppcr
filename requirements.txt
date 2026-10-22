@@ -17,3 +17,7 @@ numpy==2.4.6
 networkx==3.6.1
 # Export Excel : pur Python, aucune sous-dépendance, wheel universelle.
 XlsxWriter==3.2.9
+# Rapport PDF : ReportLab et ses deux dépendances, wheels amd64 et arm64.
+reportlab==5.0.1
+pillow==12.3.0
+charset-normalizer==3.5.2

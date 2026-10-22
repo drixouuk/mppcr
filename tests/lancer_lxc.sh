@@ -24,7 +24,7 @@ SSHOPT=(-F /dev/null -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=no
 # /tmp ne survit pas entre deux commandes locales : l'archive est refaite ici.
 ARCHIVE="${ARCHIVE:-/tmp/mppcr-harness.tgz}"
 tar czf "$ARCHIVE" \
-    -C "$STAGE" app.py dcma14.py montecarlo.py VERSION templates Dockerfile \
+    -C "$STAGE" app.py dcma14.py montecarlo.py rapport_pdf.py VERSION templates Dockerfile \
                 requirements.txt docker-compose.yml docker-compose.prod.yml \
                 .gitignore .github README.md CHANGELOG.md \
     -C "$STAGE/docs/maquettes" mppcr-redesign.html \

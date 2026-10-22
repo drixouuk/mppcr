@@ -38,6 +38,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import xlsxwriter
+
+import rapport_pdf
 from flask import Flask, g, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
@@ -186,6 +188,7 @@ EXPORT_FORMATS = {
     "xlsx": ("Classeur Excel",
              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
              "xlsx"),
+    "pdf": ("Rapport PDF", "application/pdf", "pdf"),
 }
 
 # Chemin du compteur d'usage dans l'image. USAGE_DB_PATH n'est utile que pour
@@ -1987,6 +1990,11 @@ def build_downloads(exports, results, filename, comparaison=None):
             payload = csv_export_payload(results, filename, comparaison)
         elif fmt == "xlsx":
             payload = xlsx_export_payload(results, filename, comparaison)
+        elif fmt == "pdf":
+            payload = rapport_pdf.construire(results, filename, comparaison, {
+                "labels": DCMA_LABELS, "verdicts": VERDICT_LABELS, "version": APP_VERSION,
+                "date": "/".join(reversed(aujourdhui().isoformat().split("-"))),
+            })
         else:
             continue
         libelle, mimetype, extension = EXPORT_FORMATS[fmt]

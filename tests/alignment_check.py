@@ -178,10 +178,12 @@ check("formulaire : trois cartes de type d'analyse de la maquette",
       idx.count('class="type-card"') == 3
       and "Diagnostic qualité DCMA-14" in idx and "Simulation Monte Carlo" in idx
       and "Qualité DCMA puis risque planning. Recommandé." in idx)
-check("formulaire : volet « Export des résultats (facultatif) » avec deux cases",
-      "Export des résultats" in idx and idx.count('name="export" id=') == 2
-      and 'value="csv"' in idx and 'value="xlsx"' in idx
-      and "Pour un PDF :" in idx)
+# La maquette proposait deux cases (CSV, Excel) et renvoyait à l'impression pour
+# le PDF ; depuis la v1.15, un rapport PDF construit côté serveur est une
+# troisième case, du même composant (check-row).
+check("formulaire : volet « Export des résultats (facultatif) » avec trois cases",
+      "Export des résultats" in idx and idx.count('name="export" id=') == 3
+      and 'value="csv"' in idx and 'value="xlsx"' in idx and 'value="pdf"' in idx)
 check("formulaire : volet des options Monte Carlo repliable",
       idx.count('<details class="opt">') == 2 and "Options avancées Monte Carlo" in idx)
 check("formulaire : nombre de simulations en liste déroulante (1 000 / 5 000 / 10 000)",

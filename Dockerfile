@@ -33,7 +33,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Les scripts existants sont copiés tels quels, sans modification.
-COPY dcma14.py montecarlo.py app.py ./
+COPY dcma14.py montecarlo.py app.py rapport_pdf.py ./
 COPY templates ./templates
 
 # Version publiée : affichée en pied de page et dans les exports, pour savoir

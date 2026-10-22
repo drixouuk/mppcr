@@ -454,7 +454,8 @@ check("HEALTHCHECK présent avec les bons paramètres",
 check("HEALTHCHECK via urllib (pas curl)", "urllib.request.urlopen('http://localhost:5000/healthz')" in dockerfile)
 check("/app/data créé et chowné",
       "mkdir -p /app/data" in dockerfile and "chown -R appuser:appuser /app" in dockerfile)
-check("dcma14.py et montecarlo.py copiés tels quels", "COPY dcma14.py montecarlo.py app.py ./" in dockerfile)
+check("scripts et module du rapport PDF copiés dans l'image",
+      "COPY dcma14.py montecarlo.py app.py rapport_pdf.py ./" in dockerfile)
 
 req = read("requirements.txt")
 # mpxj est volontairement épinglée à 16.6.0 : la 16.7.0 alloue sans borne dans
@@ -700,7 +701,7 @@ check("CSV téléchargé identique à csv_export_payload",
 check("XLSX téléchargé identique à xlsx_export_payload",
       _b64.b64decode(dl[1]["href"].split(",", 1)[1]) == app.xlsx_export_payload(exports, "RL.mpp"))
 check("aucun export demandé -> aucun lien", app.build_downloads([], exports, "RL.mpp") == [])
-check("format inconnu ignoré", app.build_downloads(["pdf"], exports, "RL.mpp") == [])
+check("format inconnu ignoré", app.build_downloads(["docx"], exports, "RL.mpp") == [])
 
 with app.app.test_request_context("/"):
     html_dl = app.render_template(
@@ -712,8 +713,8 @@ check("page : boutons d'export de l'en-tête (CSV + Excel)",
       and html_dl.count('download="MPPCR_RL_') == 2)
 check("page : bouton d'impression / PDF", 'id="print-btn"' in html_dl
       and "Imprimer / PDF" in html_dl and "window.print()" in html_dl)
-check("page : aucun export inerte quand les deux sont demandés",
-      html_dl.count('<span class="btn btn-ghost btn-sm"') == 0)
+check("page : seul le rapport PDF reste inerte quand CSV et Excel sont demandés",
+      html_dl.count('<span class="btn btn-ghost btn-sm"') == 1)
 with app.app.test_request_context("/"):
     html_nodl = app.render_template(
         "result.html", filename="RL.mpp",
@@ -721,7 +722,7 @@ with app.app.test_request_context("/"):
         labels=app.DCMA_LABELS, verdicts=app.VERDICT_LABELS)
 check("page : exports inertes quand rien n'est demandé",
       'download="MPPCR_' not in html_nodl
-      and html_nodl.count('<span class="btn btn-ghost btn-sm"') == 2
+      and html_nodl.count('<span class="btn btn-ghost btn-sm"') == 3
       and html_nodl.count('<a class="btn btn-ghost btn-sm"') == 0
       and 'id="print-btn"' in html_nodl
       and "Cochez « CSV »" in html_nodl)
@@ -1439,6 +1440,30 @@ if (STAGE / "test_projet.xml").exists() and (STAGE / "test_liens.xml").exists():
         content_type="multipart/form-data", headers={"X-Forwarded-For": _ip_cmp})
     check("comparaison : refusée s'il reste une seule analyse",
           _r.status_code == 429 and "Quota insuffisant pour comparer" in _html.unescape(_r.get_data(as_text=True)))
+
+
+# --------------------------------------------------------------------------
+section("v1.15 : rapport PDF")
+
+_res_pdf = []
+if (STAGE / "ref_dcma.txt").exists():
+    _res_pdf.append({"kind": "dcma", "parsed": app.parse_dcma_output(
+        (STAGE / "ref_dcma.txt").read_text(encoding="utf-8"))})
+if "_brut" in globals():
+    _res_pdf.append({"kind": "montecarlo", "parsed": app.parse_montecarlo_output(_brut)})
+_pdf = app.build_downloads(["pdf"], _res_pdf, "planning.mpp")
+_octets = _b64.b64decode(_pdf[0]["href"].split(",", 1)[1]) if _pdf else b""
+check("rapport PDF : document produit", _octets.startswith(b"%PDF-") and len(_octets) > 3000,
+      f"={len(_octets)} octets")
+check("rapport PDF : nom et type du téléchargement",
+      bool(_pdf) and _pdf[0]["filename"].endswith(".pdf") and _pdf[0]["href"].startswith("data:application/pdf"))
+_piege_pdf = [{"kind": "montecarlo", "parsed": app.parse_montecarlo_output(_sortie_piege)}]
+try:
+    app.build_downloads(["pdf"], _piege_pdf, "p.mpp")
+    check("rapport PDF : noms de tâches avec <, & et = sans erreur", True)
+except Exception as exc:  # noqa: BLE001
+    check("rapport PDF : noms de tâches avec <, & et = sans erreur", False, repr(exc))
+check("formulaire : export PDF proposé", 'value="pdf"' in client.get("/").get_data(as_text=True))
 
 
 # --------------------------------------------------------------------------
