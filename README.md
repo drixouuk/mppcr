@@ -108,8 +108,9 @@ location / {
 | `ANALYSIS_TIMEOUT` | `300` | Délai maximal, en secondes, accordé à chaque script d'analyse avant abandon. |
 | `DAILY_ANALYSIS_LIMIT` | `5` | Nombre d'analyses autorisées par adresse IP et par jour calendaire. |
 | `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
-| `MAX_UPLOAD_MB` | `20` | Taille maximale du planning accepté, en Mo (5 Mo par défaut dans l'image, 20 Mo dans le compose de production). Au-delà, refus avec un message explicite. |
+| `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo : 5 Mo dans l'image et dans `docker-compose.prod.yml`, 20 Mo dans `docker-compose.yml` (build local). Au-delà, refus avec un message explicite. |
 | `JAVA_TOOL_OPTIONS` | `-Xmx1536m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
+| `TRUSTED_PROXIES` | *(vide)* | Adresses du ou des reverse proxies, séparées par des virgules (ex. `192.168.1.141`). Renseignée, l'IP du visiteur n'est lue dans `X-Forwarded-For` que pour les requêtes venant de ces adresses : un accès direct au port 5000 ne peut plus se fabriquer une nouvelle IP à chaque requête pour contourner le quota. Vide : en-tête accepté de tous (comportement historique, à réserver à un port joignable par le seul proxy). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
 les compteurs sont écrits par défaut dans `/app/data/usage.db`.
@@ -135,7 +136,7 @@ manuelle.
 | 2 | Leads | liens des tâches restantes | liens avec lead ÷ liens |
 | 3 | Lags | liens des tâches restantes | liens avec lag ÷ liens |
 | 4 | Relations | liens des tâches restantes | liens FS ÷ liens |
-| 5 | Contraintes dures | tâches restantes | tâches non terminées avec contrainte dure ÷ tâches non terminées |
+| 5 | Contraintes dures | tâches restantes | tâches non terminées avec contrainte dure (MSO, MFO, SNLT, FNLT) ÷ tâches non terminées |
 | 6 | Marge > 44 j | tâches restantes | idem |
 | 7 | Marge négative | tâches restantes | idem |
 | 8 | Durée > 44 j | tâches restantes, hors jalons | idem |
@@ -143,7 +144,7 @@ manuelle.
 | 10 | Sans ressource | tâches restantes, hors jalons | idem |
 | 11 | Missed tasks | tâches terminées | terminées en retard ÷ échéances de baseline passées |
 | 12 | CPTest | — | vérification manuelle |
-| 13 | CPLI | chemin critique | (durée du chemin critique + marge totale) ÷ durée du chemin critique |
+| 13 | CPLI | chemin critique | (longueur du chemin critique + marge totale du chemin critique) ÷ longueur du chemin critique |
 | 14 | BEI | tout le planning | terminées ÷ à terminer selon la baseline |
 
 **Tâches d'un autre planning.** Les tâches marquées comme **externes**
@@ -168,6 +169,22 @@ invérifiables ici — sur un planning réel, 16 des 44 signalements du contrôl
 > 66,67 % — un historique « propre » diluait la mesure. Les contrôles 11 à 14 sont
 > inchangés. La référence figée des tests est régénérée à chaque changement de
 > périmètre, et le contrôle de non-régression la compare réellement à une exécution.
+
+**Contraintes dures (contrôle 5).** Sont comptées « Doit commencer le » (MSO),
+« Doit finir le » (MFO), « Début au plus tard le » (SNLT) et « Fin au plus tard
+le » (FNLT), plus leurs équivalents Primavera. Jusqu'à la v1.13.0, SNLT et FNLT
+n'étaient pas comptées : sur un `.mpp`, seules MSO et MFO l'étaient.
+
+**CPLI (contrôle 13).** La longueur du chemin critique est l'**étendue** des
+tâches critiques de détail (du début le plus tôt à la fin la plus tardive), en
+jours ouvrés du calendrier du projet ; à défaut de calendrier, le plus long
+enchaînement de tâches critiques par leurs liens. La marge retenue est la **plus
+faible** des tâches critiques, celle qui pilote la fin du projet. Jusqu'à la
+v1.13.0, les durées des tâches critiques étaient **additionnées** et la marge la
+plus forte retenue : deux chemins critiques parallèles de 20 j en retard de 3 j
+donnaient 0,93 au lieu de 0,85. Une tâche critique ayant une marge ≤ 0, le CPLI
+calculé ne dépasse pas 1 : mesurer une avance demanderait une échéance
+contractuelle, que le planning ne porte pas de façon fiable.
 
 **Écarts connus** par rapport au texte du référentiel, non corrigés à ce stade car
 ils touchent la *définition* des métriques et non leur population : le contrôle 8
@@ -209,6 +226,20 @@ Les durées sont converties en **jours ouvrés** via le calendrier du projet, co
 dans `dcma14.py` : sans cela, un planning dont les durées sont exprimées en heures
 était simulé en heures puis affiché en « jours » (dix tâches de 40 h donnaient
 400 j au lieu de 50 j).
+
+**Types de liens.** Le passage avant et le passage arrière respectent le type
+de chaque lien et son décalage : **FS** (le successeur débute après la fin du
+prédécesseur), **SS** (après son début), **FF** (il finit après sa fin), **SF**
+(il finit après son début). Jusqu'à la v1.13.0, tous les liens étaient traités
+comme FS : deux tâches de 10 j liées début-début donnaient 20 j au lieu de 10, ce
+qui surestimait la durée CPM, les P50/P80/P90 et la criticité de tout planning
+comportant des liens SS ou FF.
+
+**CSV d'estimations.** Séparateur `,` ou `;` (export Excel FR), virgule
+décimale acceptée, BOM UTF-8 toléré. Chaque ligne doit vérifier
+`0 ≤ optimistic ≤ most_likely ≤ pessimistic` : sinon la loi PERT n'est pas
+définie, et le fichier est refusé avec la ligne en cause au lieu de faire
+échouer la simulation sans motif.
 
 Deux garde-fous : sans aucun lien exploitable, la simulation s'arrête avec un
 message explicite plutôt que de traiter chaque tâche comme indépendante ; et un
@@ -322,6 +353,13 @@ dans l'en-tête de la page de résultat. Un export non demandé y reste visible
 | **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : score, synthèse, contrôles, priorités, Monte Carlo, criticité, répartition par lot si demandée, sorties brutes |
 | **Excel** | une feuille par analyse lancée (« Contrôles DCMA-14 », « Monte Carlo »), verdicts colorés, score en tête |
 
+**Injection de formules.** Les noms de tâches et de lots viennent du planning
+envoyé : un nom commençant par `=`, `+`, `-` ou `@` aurait été lu comme une
+formule par Excel ou LibreOffice (`=HYPERLINK(…)` pouvant envoyer le contenu des
+cellules vers un site tiers). Le classeur Excel écrit donc toute chaîne comme
+**texte** (ni formule, ni lien automatique) et le CSV préfixe ces cellules d'une
+apostrophe ; les écarts signés (`-1.5`, `+4.0`) restent des nombres.
+
 Les fichiers sont produits dans la même requête que l'affichage et **encodés dans
 la page elle-même** (`data:`) : aucune écriture côté serveur, aucune requête
 supplémentaire, aucun JavaScript, et un simple clic suffit à télécharger. Un même
@@ -361,7 +399,7 @@ garde-fous ont été ajoutés :
 | Garde-fou | Effet |
 | --- | --- |
 | `JAVA_TOOL_OPTIONS=-Xmx1536m …` (image) | borne le tas de chaque analyse : de 7,8 Go à 1,5 Go |
-| `MAX_UPLOAD_MB` (20 en production, 5 par défaut) | refuse les fichiers trop gros par un message explicite, avant lecture |
+| `MAX_UPLOAD_MB` (5 en production et par défaut) | refuse les fichiers trop gros par un message explicite, avant lecture |
 | `mem_limit: 5g` + `oom_score_adj: 500` (compose) | le conteneur ne peut pas affamer ses voisins, et c'est lui que le noyau tue en premier |
 | `ANALYSIS_TIMEOUT=300` | un fichier pathologique est coupé au bout de 5 minutes, jamais la journée |
 
@@ -445,14 +483,27 @@ serait incohérent entre les workers. Au-delà du quota, le formulaire refuse la
 requête avec une page explicite, sans lancer d'analyse. Le formulaire affiche le
 nombre d'analyses restantes pour l'IP courante.
 
-Le quota n'est décompté **qu'après une analyse réussie** : un fichier illisible,
-un dépassement de délai, une attente sur le sémaphore ou une analyse arrêtée par
-le visiteur ne consomment rien. Le contrôle effectué à l'entrée de la route reste une barrière
+Le quota est décompté **après une analyse réussie**, et aussi après un échec qui
+a mobilisé le service autant qu'elle : **dépassement du délai maximal** ou
+**mémoire épuisée** (le visiteur en est prévenu). Sans cela, un fichier
+pathologique renvoyé en boucle occupait les créneaux d'analyse indéfiniment sans
+jamais atteindre la limite du jour. Un fichier illisible, une attente sur le
+sémaphore ou une analyse arrêtée par le visiteur ne consomment rien — sauf, en
+mode « les deux », le diagnostic DCMA-14 déjà terminé quand l'arrêt survient
+pendant la simulation (la page le dit). Le contrôle effectué à l'entrée de la route reste une barrière
 simple : une rafale de requêtes simultanées d'une même IP peut dépasser le quota
 d'au plus `MAX_CONCURRENT_ANALYSES` analyses.
 
 Les analyses lourdes sont bornées par `MAX_CONCURRENT_ANALYSES`, compteur partagé
-via SQLite entre tous les workers et threads. Au-delà, la requête reçoit une page
+via SQLite entre tous les workers et threads. Un créneau n'est considéré comme
+orphelin (worker tué) qu'au-delà de `2 × (ANALYSIS_TIMEOUT + 20) + 120` s, soit
+760 s avec le délai de 300 s : une requête enchaîne jusqu'à deux scripts. Avec
+l'ancien seuil (`ANALYSIS_TIMEOUT + 120`), une analyse « les deux » encore en cours
+perdait son créneau, et de nouvelles JVM démarraient au-delà de la limite.
+
+Le serveur borne aussi les options Monte Carlo à ce que propose le formulaire :
+**10 000 simulations** au plus, facteur optimiste ≤ 1 ≤ facteur pessimiste ≤ 10,
+valeurs finies (`nan` et `inf` sont refusés). Au-delà, la requête reçoit une page
 « Analyse en cours » (HTTP 503 + `Retry-After`) et **ne consomme pas de quota**.
 Gunicorn tourne en `gthread` (2 workers × 4 threads) : une analyse occupe un
 thread, mais `subprocess.run()` relâche le GIL, si bien que le formulaire et
@@ -482,6 +533,13 @@ d'usage par IP (nombre d'analyses par jour), sans lien avec le contenu analysé.
 >
 > Le contrôle d'accès par comptes utilisateurs est volontairement hors périmètre
 > de cette version.
+
+Chaque réponse porte des **en-têtes de sécurité** : `Content-Security-Policy`
+(aucune ressource externe, scripts limités aux deux scripts de l'application par
+un jeton à usage unique, aucun cadre), `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. Derrière NPMplus,
+renseigner `TRUSTED_PROXIES` avec l'adresse du proxy (voir « Variables
+d'environnement »).
 
 Le endpoint `/healthz` reste public, comme attendu par un reverse proxy ou un
 orchestrateur.
@@ -572,7 +630,7 @@ Trois vérifications, à lancer avant toute publication :
 
 | Vérification | Portée | Volume |
 | --- | --- | --- |
-| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports, mémoire, répartition par lot, non-régression des sorties de référence | 320 |
+| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports (injection de formules), proxies de confiance, en-têtes, mémoire, répartition par lot, types de liens, CPLI et contraintes sur `test_liens.xml`, non-régression des sorties de référence | 344 |
 | `alignment_check.py` | feuille de style de la maquette reprise **verbatim**, jetons, classes, structure des écrans | 190 |
 | `verify_prod.sh` | production réelle : conteneur, HTTP, répartition par lot, exports, refus, charge, absence de résidu | 62 |
 

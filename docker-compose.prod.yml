@@ -11,6 +11,12 @@ services:
       - DAILY_ANALYSIS_LIMIT=5   # analyses autorisées par IP et par jour
       - MAX_CONCURRENT_ANALYSES=2  # deux analyses de front, soit deux JVM de 1,5 Go
       - MAX_UPLOAD_MB=5            # taille maximale du planning accepté
+      # Adresse du reverse proxy (NPMplus) : X-Forwarded-For n'est alors lu que pour
+      # ses requêtes, et un accès direct au port 5000 ne peut plus contourner le
+      # quota en forgeant cet en-tête. À activer après avoir vérifié l'adresse
+      # source vue par le conteneur : une valeur fausse ferait partager un seul
+      # quota à tous les visiteurs.
+      # - TRUSTED_PROXIES=192.168.1.141
       # Mémoire allouée à la JVM d'analyse : à augmenter si vous acceptez de gros
       # plannings et disposez de la mémoire (1,5 Go ici par analyse ; garder le
       # total sous le plafond du conteneur, sinon le noyau tue la JVM).

@@ -43,5 +43,7 @@ Documentation de référence : [`README.md`](README.md) (contrôles, score, mém
 - Le **smoke test CI** fait des `grep` sur le HTML (libellés, `id`, classes) : modifier un template impose de vérifier `docker-publish.yml`.
 - Derrière un reverse proxy : `X-Forwarded-For` obligatoire (`ProxyFix x_for=1`) sinon le quota par IP compte le proxy ; `proxy_read_timeout` ≥ 700 s.
 - **Jamais commité** : `*.mpp`, `*.mspdi`, `*.csv` (plannings clients), `.env*`.
+- `tests/test_liens.xml` : planning de test des liens SS/FF, de la contrainte SNLT et du CPLI (deux chemins critiques parallèles en retard de 3 j) ; ses valeurs attendues (CPM 22 j, CPLI 0,85, SNLT 1/7) sont vérifiées par `check_mppcr.py`.
+- `TRUSTED_PROXIES` (adresse de NPMplus) ferme le contournement du quota par `X-Forwarded-For` en accès direct au port 5000 — à n'activer qu'après avoir vérifié l'adresse source vue par le conteneur, sinon tous les visiteurs partagent un seul quota.
 - `.gitignore` exclut `*.mpp` : seul `tests/planning_ci.mpp` (synthétique) est réintégré par une exception.
 - État git au 22/10/2026 : `main` = v1.13.0 ; branche `origin/dev/montecarlo-macro` (3 commits d'avance, répartition du risque par lot, `VERSION` `v1.14.0-dev`).

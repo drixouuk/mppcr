@@ -22,6 +22,7 @@ import base64
 import csv
 import io
 import logging
+import math
 import os
 import re
 import secrets
@@ -36,7 +37,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import xlsxwriter
-from flask import Flask, render_template, request
+from flask import Flask, g, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
@@ -68,7 +69,41 @@ app = Flask(__name__)
 
 @app.context_processor
 def injecter_version():
-    return {"app_version": APP_VERSION}
+    return {"app_version": APP_VERSION, "csp_nonce": csp_nonce()}
+
+
+def csp_nonce():
+    """Jeton à usage unique autorisant les deux scripts en ligne de la page."""
+    if "csp_nonce" not in g:
+        g.csp_nonce = secrets.token_urlsafe(16)
+    return g.csp_nonce
+
+
+@app.after_request
+def entetes_securite(response):
+    """En-têtes de sécurité : aucune ressource externe, aucun cadre, scripts
+    limités à ceux de l'application (jeton à usage unique).
+
+    Les styles en ligne restent autorisés : la feuille de la maquette et les
+    largeurs de barres (style="width:…") sont rendues côté serveur. Les exports
+    sont des liens data: ouverts par l'utilisateur, que la CSP ne bloque pas.
+    """
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{csp_nonce()}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
+        "object-src 'none'",
+    )
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
 
 
 app.logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
@@ -89,9 +124,49 @@ app.config["MAX_CONTENT_LENGTH"] = HARD_UPLOAD_MB * 1024 * 1024
 
 TIMEOUT_SECONDS = int(os.environ.get("ANALYSIS_TIMEOUT", "900"))
 
+# Une requête enchaîne au plus deux scripts (diagnostic puis simulation), chacun
+# borné par TIMEOUT_SECONDS, plus l'arrêt forcé de stop_process (20 s au pire).
+# Un créneau plus ancien que cette durée ne peut appartenir qu'à un worker tué :
+# le purger plus tôt laissait démarrer de nouvelles JVM pendant qu'une analyse
+# « les deux » tournait encore, au-delà de MAX_CONCURRENT_ANALYSES.
+SCRIPTS_PER_REQUEST = 2
+
+
+def slot_stale_seconds():
+    return SCRIPTS_PER_REQUEST * (TIMEOUT_SECONDS + 20) + 120
+
 # Un seul reverse proxy (NPMplus) est placé devant l'application : x_for=1 fait
 # lire l'IP réelle du visiteur dans l'en-tête X-Forwarded-For.
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+#
+# Cet en-tête n'est fiable que s'il vient du proxy : un visiteur qui joint
+# directement le port 5000 peut l'écrire lui-même et changer d'« adresse » à
+# chaque requête, donc contourner le quota. TRUSTED_PROXIES (adresses séparées
+# par des virgules, ex. « 192.168.1.141 ») restreint sa prise en compte aux
+# requêtes émises par ces adresses ; vide, l'en-tête est accepté de tous
+# (comportement historique, à réserver à un port joignable par le seul proxy).
+TRUSTED_PROXIES = frozenset(
+    adresse.strip()
+    for adresse in os.environ.get("TRUSTED_PROXIES", "").split(",")
+    if adresse.strip()
+)
+
+
+class ForwardedFromTrustedProxies:
+    """Retire les en-têtes X-Forwarded-* d'une requête qui ne vient pas d'un
+    proxy de confiance, avant que ProxyFix ne les lise."""
+
+    def __init__(self, wsgi_app, trusted):
+        self.wsgi_app = wsgi_app
+        self.trusted = trusted
+
+    def __call__(self, environ, start_response):
+        if self.trusted and environ.get("REMOTE_ADDR") not in self.trusted:
+            for cle in [cle for cle in environ if cle.startswith("HTTP_X_FORWARDED_")]:
+                del environ[cle]
+        return self.wsgi_app(environ, start_response)
+
+
+app.wsgi_app = ForwardedFromTrustedProxies(ProxyFix(app.wsgi_app, x_for=1), TRUSTED_PROXIES)
 
 # Quota d'analyses par adresse IP et par jour calendaire.
 DAILY_ANALYSIS_LIMIT = int(os.environ.get("DAILY_ANALYSIS_LIMIT", "5"))
@@ -126,7 +201,17 @@ LOG4J_NOISE = re.compile(
 
 
 class AnalysisError(RuntimeError):
-    pass
+    """Échec d'analyse affiché au visiteur.
+
+    `consumed` : l'échec a mobilisé le service autant qu'une analyse aboutie
+    (délai maximal atteint, mémoire épuisée). Il est alors décompté du quota,
+    sans quoi un fichier pathologique renvoyé en boucle occuperait les créneaux
+    d'analyse indéfiniment sans jamais atteindre la limite du jour.
+    """
+
+    def __init__(self, message, consumed=False):
+        super().__init__(message)
+        self.consumed = consumed
 
 
 class AnalysisCancelled(AnalysisError):
@@ -263,7 +348,7 @@ def acquire_analysis_slot(ip, token=None):
     Le jeton permet au visiteur d'annuler son analyse depuis la page d'attente.
     """
     started = datetime.now(timezone.utc)
-    stale_before = (started - timedelta(seconds=TIMEOUT_SECONDS + 120)).isoformat()
+    stale_before = (started - timedelta(seconds=slot_stale_seconds())).isoformat()
     try:
         with closing(usage_connect()) as conn:
             # Créneaux orphelins (worker tué en pleine analyse) : purgés pour ne
@@ -1370,6 +1455,13 @@ def parse_montecarlo_output(text, macro_level=None):
     return parsed
 
 
+# Bornes des options Monte Carlo acceptées par le serveur : le formulaire propose
+# 1 000 à 10 000 simulations ; au-delà, un appel direct pouvait réclamer 50 000
+# tirages et occuper un créneau jusqu'au délai maximal.
+MAX_SIMULATIONS = 10000
+MAX_PESSIMISTIC_FACTOR = 10.0
+
+
 def parse_montecarlo_options(form):
     """Options Monte Carlo lues dans le formulaire.
 
@@ -1393,8 +1485,10 @@ def parse_montecarlo_options(form):
     except ValueError:
         raise ValueError("Le nombre de simulations doit être un entier.")
 
-    if sims < 1 or sims > 50000:
-        raise ValueError("Le nombre de simulations doit être compris entre 1 et 50000.")
+    if sims < 1 or sims > MAX_SIMULATIONS:
+        raise ValueError(
+            f"Le nombre de simulations doit être compris entre 1 et {MAX_SIMULATIONS}."
+        )
 
     try:
         opt = float(opt_raw)
@@ -1402,11 +1496,23 @@ def parse_montecarlo_options(form):
     except ValueError:
         raise ValueError("Les facteurs optimiste et pessimiste doivent être des nombres décimaux.")
 
+    # isfinite écarte « nan » et « inf », que float() accepte : nan passait tous
+    # les tests suivants (toute comparaison avec nan est fausse).
+    if not (math.isfinite(opt) and math.isfinite(pess)):
+        raise ValueError("Les facteurs optimiste et pessimiste doivent être des nombres finis.")
+
     if opt <= 0 or pess <= 0:
         raise ValueError("Les facteurs optimiste et pessimiste doivent être strictement positifs.")
 
     if pess < opt:
         raise ValueError("Le facteur pessimiste doit être supérieur ou égal au facteur optimiste.")
+
+    if opt > 1 or pess < 1 or pess > MAX_PESSIMISTIC_FACTOR:
+        raise ValueError(
+            "Le facteur optimiste doit être au plus 1 et le facteur pessimiste compris "
+            f"entre 1 et {nombre_fr(MAX_PESSIMISTIC_FACTOR, 0)} : la durée planifiée est "
+            "la valeur la plus probable."
+        )
 
     return sims, opt, pess
 
@@ -1489,7 +1595,8 @@ def run_script(cmd, label, token=None):
                 app.logger.error("Timeout pendant %s", label)
                 raise AnalysisError(
                     "L'analyse a dépassé le délai maximal. Réduisez le nombre de "
-                    "simulations ou vérifiez le fichier."
+                    "simulations ou vérifiez le fichier.",
+                    consumed=True,
                 )
 
     duree = time.monotonic() - commence
@@ -1506,12 +1613,21 @@ def run_script(cmd, label, token=None):
     )
 
     if proc.returncode != 0:
+        # CSV d'estimations refusé par montecarlo.py : le motif est affiché tel
+        # quel (ligne et valeurs en cause) plutôt qu'un échec générique.
+        refus = re.search(r"ESTIMATIONS_INVALIDES:\s*(.+)", stderr_utile)
+        if refus:
+            raise AnalysisError(
+                f"Fichier d'estimations refusé : {refus.group(1).strip()}. Format attendu : "
+                "task_id,optimistic,most_likely,pessimistic, en jours, avec "
+                "optimistic ≤ most_likely ≤ pessimistic."
+            )
         if memory_shortage(stderr_utile, stdout):
             app.logger.error(
                 "%s : mémoire insuffisante (pic %s Mo, code %s) — %s",
                 label, pic_memoire or "?", proc.returncode, stderr_utile[:800],
             )
-            raise AnalysisError(memory_shortage_message())
+            raise AnalysisError(memory_shortage_message(), consumed=True)
         app.logger.error(
             "%s a échoué avec le code %s\nstdout=%s\nstderr=%s",
             label, proc.returncode, stdout, stderr_utile[:2000],
@@ -1667,6 +1783,40 @@ def dispersion_export_line(parsed):
     return None
 
 
+# Une cellule commençant par l'un de ces caractères est interprétée comme une
+# formule par Excel, LibreOffice ou Google Sheets. Les noms de tâches et de lots
+# viennent du planning envoyé : un nom « =HYPERLINK(…) » devenait une formule
+# active dans l'export (injection de formules, CWE-1236).
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+NOMBRE_SIGNE = re.compile(r"^[-+]\d+(?:[.,]\d+)?$")
+
+
+def neutraliser_formule(valeur):
+    """Préfixe d'une apostrophe un texte qui serait lu comme une formule.
+
+    Les nombres signés (« -1.5 », « +4.0 ») restent intacts : ce sont des
+    écarts, pas des formules.
+    """
+    if (isinstance(valeur, str) and valeur.startswith(FORMULA_PREFIXES)
+            and not NOMBRE_SIGNE.match(valeur)):
+        return "'" + valeur
+    return valeur
+
+
+class CsvSansFormule:
+    """csv.writer dont chaque cellule passe par neutraliser_formule()."""
+
+    def __init__(self, writer):
+        self._writer = writer
+
+    def writerow(self, row):
+        self._writer.writerow([neutraliser_formule(valeur) for valeur in row])
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)
+
+
 def csv_export_payload(results, filename):
     """CSV séparé par des points-virgules, avec BOM UTF-8 (Excel FR).
 
@@ -1674,7 +1824,7 @@ def csv_export_payload(results, filename):
     une ligne « # … ».
     """
     buffer = io.StringIO()
-    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer = CsvSansFormule(csv.writer(buffer, delimiter=";", lineterminator="\r\n"))
     writer.writerow(["MPPCR — MS Project Check & Risk"])
     writer.writerow(["Fichier analysé", filename])
     writer.writerow(["Date de l'export", date.today().isoformat()])
@@ -1798,7 +1948,14 @@ def xlsx_export_payload(results, filename):
     montecarlo = parsed_by_kind(results, "montecarlo")
 
     output = io.BytesIO()
-    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    # Par défaut, XlsxWriter écrit en FORMULE toute chaîne commençant par « = »
+    # et en lien toute chaîne qui ressemble à une URL : les noms de tâches venant
+    # du planning, tout est écrit comme texte.
+    workbook = xlsxwriter.Workbook(output, {
+        "in_memory": True,
+        "strings_to_formulas": False,
+        "strings_to_urls": False,
+    })
     titre = workbook.add_format({"bold": True, "font_size": 14, "font_color": "#16181d"})
     entete = workbook.add_format({
         "bold": True, "bg_color": "#fbfcfd", "border": 1, "border_color": "#e3e6ea",
@@ -2051,7 +2208,8 @@ def annuler(token):
             title="Arrêt demandé",
             variant="warn",
             message="L'analyse en cours va s'interrompre dans quelques instants. "
-                    "Votre quota n'a pas été décompté pour cette tentative.",
+                    "Elle n'est décomptée de votre quota que si une étape (diagnostic "
+                    "DCMA-14) était déjà terminée.",
         )
     return render_template(
         "error.html",
@@ -2127,6 +2285,8 @@ def analyse():
             message=busy_message(),
         ), 503, {"Retry-After": "30"}
 
+    quota_counted = False
+
     try:
         with tempfile.TemporaryDirectory(prefix="mppweb_") as tmpdir:
             tmp_path = Path(tmpdir)
@@ -2157,7 +2317,6 @@ def analyse():
                     ), 400
 
             results = []
-            quota_counted = False
 
             if analysis in {"dcma", "both"}:
                 # --details ajoute le bloc « numéros de tâches en écart », qui
@@ -2237,16 +2396,30 @@ def analyse():
 
     except AnalysisCancelled:
         app.logger.info("Analyse annulée par le visiteur (IP %s)", ip)
+        if quota_counted:
+            # Mode « les deux » : le diagnostic était terminé (et décompté) quand
+            # l'arrêt est arrivé pendant la simulation.
+            message = ("L'analyse a été interrompue à votre demande pendant la simulation "
+                       "Monte Carlo. Le diagnostic DCMA-14, déjà terminé, a été décompté "
+                       "de votre quota du jour.")
+        else:
+            message = ("L'analyse a été interrompue à votre demande. Aucune analyse "
+                       "n'a été décomptée de votre quota du jour.")
         return render_template(
             "error.html",
             title="Analyse interrompue",
             variant="warn",
-            message="L'analyse a été interrompue à votre demande. Aucune analyse "
-                    "n'a été décomptée de votre quota du jour.",
+            message=message,
         )
 
     except AnalysisError as exc:
-        return render_template("error.html", message=str(exc)), 400
+        message = str(exc)
+        if exc.consumed:
+            if not quota_counted:
+                count_analysis(ip, quota_counted)
+            message += (" Cette tentative a été décomptée de votre quota du jour : elle a "
+                        "mobilisé le service autant qu'une analyse aboutie.")
+        return render_template("error.html", message=message), 400
 
     except Exception:
         app.logger.exception("Erreur inattendue pendant l'analyse")

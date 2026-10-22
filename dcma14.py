@@ -49,11 +49,22 @@ THRESHOLDS = {
 HIGH_FLOAT_DAYS = 44
 HIGH_DURATION_DAYS = 44
 
+# Contraintes dures au sens DCMA : celles qui empechent la logique de piloter les
+# dates. Dans MS Project : « Doit commencer le » (MSO), « Doit finir le » (MFO),
+# « Debut au plus tard le » (SNLT) et « Fin au plus tard le » (FNLT). START_ON,
+# FINISH_ON et MANDATORY_* sont leurs equivalents Primavera, conserves pour les
+# fichiers de cet outil. SNLT et FNLT manquaient : sur un .mpp, seules MSO et
+# MFO etaient donc comptees. getattr : une valeur absente de la version de MPXJ
+# installee est simplement ignoree.
 HARD_CONSTRAINTS = {
-    ConstraintType.MUST_START_ON,
-    ConstraintType.MUST_FINISH_ON,
-    ConstraintType.START_ON,
-    ConstraintType.FINISH_ON,
+    valeur for valeur in (
+        getattr(ConstraintType, nom, None) for nom in (
+            "MUST_START_ON", "MUST_FINISH_ON",
+            "START_NO_LATER_THAN", "FINISH_NO_LATER_THAN",
+            "START_ON", "FINISH_ON",
+            "MANDATORY_START", "MANDATORY_FINISH",
+        )
+    ) if valeur is not None
 }
 
 # --- Detail des taches concernees (option --details) -----------------------
@@ -485,20 +496,72 @@ def check_bei(tasks, status_date):
     return round(actually_done / should_be_done, 2), actually_done, should_be_done
 
 
+def longueur_chemin_critique(critiques):
+    """Longueur du chemin critique, en jours ouvres.
+
+    Mesuree comme l'etendue des taches critiques de detail : du debut le plus tot
+    a la fin la plus tardive, convertie par le calendrier du projet. L'ancienne
+    formule ADDITIONNAIT leurs durees : deux chemins critiques paralleles de 30 j
+    comptaient pour 60 j, ce qui rapprochait artificiellement le CPLI de 1 (un
+    retard de 3 j donnait 0,95, conforme, au lieu de 0,90).
+
+    Sans calendrier exploitable, repli sur le plus long enchainement de taches
+    critiques par leurs liens (somme des durees le long d'un seul chemin).
+    """
+    debuts = [t.getStart() for t in critiques if t.getStart() is not None]
+    fins = [t.getFinish() for t in critiques if t.getFinish() is not None]
+    if PROJECT_CALENDAR is not None and debuts and fins:
+        try:
+            travail = PROJECT_CALENDAR.getWork(min(debuts), max(fins), TimeUnit.DAYS)
+            longueur = float(travail.getDuration())
+            if longueur > 0:
+                return longueur
+        except Exception:
+            pass
+
+    par_uid = {int(t.getUniqueID()): t for t in critiques}
+    memo = {}
+
+    def plus_long(uid, en_cours):
+        if uid in memo:
+            return memo[uid]
+        tache = par_uid[uid]
+        meilleur = 0.0
+        for rel in (tache.getPredecessors() or []):
+            pred = rel.getPredecessorTask()
+            if pred is None:
+                continue
+            pred_uid = int(pred.getUniqueID())
+            if pred_uid in par_uid and pred_uid not in en_cours:
+                meilleur = max(meilleur, plus_long(pred_uid, en_cours | {uid}))
+        memo[uid] = meilleur + duration_days(tache.getDuration())
+        return memo[uid]
+
+    return max((plus_long(uid, frozenset()) for uid in par_uid), default=0.0)
+
+
 def check_cpli(tasks):
-    """13. Critical Path Length Index — approxime ici par
-    (duree du chemin critique + marge totale de la tache la plus tardive
-    du chemin critique) / duree du chemin critique. Version simplifiee :
-    necessite un chemin critique identifiable (getCritical())."""
+    """13. Critical Path Length Index = (longueur du chemin critique + marge
+    totale du chemin critique) / longueur du chemin critique.
+
+    La marge retenue est la PLUS FAIBLE des taches critiques de detail : c'est
+    elle qui pilote la fin du projet (un chemin a -3 j et un autre a 0 j font un
+    projet en retard de 3 j). L'ancienne version prenait la plus forte, qui
+    masquait le chemin le plus en retard. Necessite un chemin critique
+    identifiable (getCritical()).
+
+    Limite connue : une tache critique a une marge <= 0, le CPLI calcule ne
+    depasse donc pas 1. Mesurer une avance (CPLI > 1) demanderait une echeance
+    contractuelle, que le planning ne porte pas de facon fiable."""
     critical = [t for t in tasks if t is not None and t.getName() is not None and t.getCritical()]
     if not critical:
         return None, 0
-    # duree du chemin critique = somme des durees des taches critiques (approximation)
-    cp_length = sum(duration_days(t.getDuration()) for t in critical if not t.getSummary())
+    details = [t for t in critical if not t.getSummary()]
+    cp_length = longueur_chemin_critique(details) if details else 0.0
     if cp_length == 0:
         return None, len(critical)
-    max_float = max((duration_days(t.getTotalSlack()) for t in critical), default=0.0)
-    cpli = round((cp_length + max_float) / cp_length, 2)
+    marge = min((duration_days(t.getTotalSlack()) for t in details), default=0.0)
+    cpli = round((cp_length + marge) / cp_length, 2)
     record_detail(13, critical)
     return cpli, len(critical)
 

@@ -24,7 +24,7 @@ tar czf "$ARCHIVE" \
                 requirements.txt docker-compose.yml docker-compose.prod.yml \
                 .gitignore .github README.md CHANGELOG.md \
     -C "$CHECK" check_mppcr.py alignment_check.py make_preview.py \
-                test_projet.xml ref_dcma.txt ref_mc.txt gen_base.py mesure_options.py \
+                test_projet.xml test_liens.xml ref_dcma.txt ref_mc.txt gen_base.py mesure_options.py \
                 temoin_recap.py lots_temoin.py debug_macro.py \
     -C "$(dirname "$DEPS")" "$(basename "$DEPS")"
 

@@ -201,7 +201,7 @@
 {# Confort uniquement : nom du fichier choisi, récapitulatif du panneau de
    droite et page d'attente. Le formulaire reste entièrement fonctionnel sans
    JavaScript (l'input natif couvre la zone de dépôt). #}
-<script>
+<script nonce="{{ csp_nonce }}">
   (function () {
     var form = document.getElementById("analyse-form");
     var drop = document.getElementById("drop");

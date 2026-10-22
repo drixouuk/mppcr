@@ -15,7 +15,8 @@ Principe :
     taches sont au contraire exclues du perimetre des controles.
   - Fait tourner N simulations : a chaque iteration, tire une duree aleatoire
     par tache et recalcule la date de fin de projet par un passage avant
-    (forward pass) sur le graphe de dependances (networkx).
+    (forward pass) sur le graphe de dependances (networkx), en respectant le
+    type de chaque lien (FS, SS, FF, SF) et son decalage.
   - Restitue P50/P80/P90 de la date de fin, et un indice de criticite par
     tache (% de simulations ou la tache est sur le chemin critique).
 
@@ -51,6 +52,8 @@ Necessite: pip install mpxj jpype1 numpy networkx --break-system-packages
 """
 import sys
 import csv
+import io
+import math
 import argparse
 import numpy as np
 import networkx as nx
@@ -60,6 +63,7 @@ import jpype
 mpxj.startJVM()
 UniversalProjectReader = jpype.JClass("org.mpxj.reader.UniversalProjectReader")
 TimeUnit = jpype.JClass("org.mpxj.TimeUnit")
+RelationType = jpype.JClass("org.mpxj.RelationType")
 
 # Calendrier du projet, renseigne a la lecture : il ramene les durees en jours
 # ouvres (voir duration_days).
@@ -111,19 +115,74 @@ def est_gelee(t):
         return False
 
 
+# Marqueur ecrit sur stderr quand le CSV d'estimations est refuse : l'interface
+# web le reconnait et affiche le motif au lieu d'un echec generique.
+MARQUEUR_ESTIMATIONS = "ESTIMATIONS_INVALIDES:"
+COLONNES_ESTIMATIONS = ("task_id", "optimistic", "most_likely", "pessimistic")
+
+
+class EstimationsInvalides(ValueError):
+    pass
+
+
 def load_estimates_csv(path):
     """CSV optionnel avec colonnes: task_id,optimistic,most_likely,pessimistic
     (en jours). Permet de remplacer l'approximation par facteurs avec de
-    vraies estimations 3-points saisies par les pilotes de lot/composant."""
+    vraies estimations 3-points saisies par les pilotes de lot/composant.
+
+    Accepte la virgule ou le point-virgule comme separateur (Excel FR exporte au
+    point-virgule), la virgule decimale et un BOM UTF-8. Chaque ligne doit
+    verifier 0 <= optimiste <= probable <= pessimiste : sinon la loi PERT n'est
+    pas definie (parametre beta negatif) et la simulation plantait sans motif.
+    Leve EstimationsInvalides avec un message lisible.
+    """
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            contenu = f.read()
+    except UnicodeDecodeError:
+        raise EstimationsInvalides("le fichier doit etre encode en UTF-8")
+    premiere = contenu.splitlines()[0] if contenu.strip() else ""
+    separateur = ";" if premiere.count(";") > premiere.count(",") else ","
+    lecteur = csv.DictReader(io.StringIO(contenu), delimiter=separateur)
+    entetes = {(nom or "").strip().lower() for nom in (lecteur.fieldnames or [])}
+    manquantes = [c for c in COLONNES_ESTIMATIONS if c not in entetes]
+    if manquantes:
+        raise EstimationsInvalides(
+            f"colonne(s) absente(s) : {', '.join(manquantes)} "
+            f"(attendu : {','.join(COLONNES_ESTIMATIONS)})")
+
     estimates = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            estimates[int(row["task_id"])] = (
-                float(row["optimistic"]),
-                float(row["most_likely"]),
-                float(row["pessimistic"]),
-            )
+    for numero, brut in enumerate(lecteur, start=2):
+        ligne = {(cle or "").strip().lower(): (valeur or "").strip()
+                 for cle, valeur in brut.items() if cle is not None}
+        if not any(ligne.values()):
+            continue
+        try:
+            uid = int(ligne["task_id"])
+            o, m, p = (float(ligne[c].replace(",", ".")) for c in COLONNES_ESTIMATIONS[1:])
+        except (ValueError, AttributeError):
+            raise EstimationsInvalides(f"ligne {numero} : valeur non numerique")
+        if not all(math.isfinite(x) for x in (o, m, p)) or not 0 <= o <= m <= p:
+            raise EstimationsInvalides(
+                f"ligne {numero} (tache {uid}) : il faut 0 <= optimistic <= most_likely "
+                f"<= pessimistic (lu : {o:g} / {m:g} / {p:g})")
+        estimates[uid] = (o, m, p)
     return estimates
+
+
+def type_lien(relation):
+    """Type du lien : FS (fin -> debut), SS, FF ou SF. FS par defaut."""
+    try:
+        genre = relation.getType()
+    except Exception:
+        return "FS"
+    if genre == RelationType.START_START:
+        return "SS"
+    if genre == RelationType.FINISH_FINISH:
+        return "FF"
+    if genre == RelationType.START_FINISH:
+        return "SF"
+    return "FS"
 
 
 def collecter_details(tache, accumulateur):
@@ -222,7 +281,7 @@ def build_graph(proj, opt_factor, pess_factor, estimates):
             pred_uid = int(pred_task.getUniqueID())
             if pred_uid in tasks:
                 lag = duration_days(rel.getLag())
-                G.add_edge(pred_uid, uid, lag=lag)
+                G.add_edge(pred_uid, uid, lag=lag, type=type_lien(rel))
                 n_links += 1
 
     return G, n_links, gelees
@@ -238,18 +297,69 @@ def sample_pert(o, m, p, rng, shape=4.0):
     return o + rng.beta(alpha, beta) * (p - o)
 
 
+def passage_avant(G, order, durees):
+    """Dates au plus tot (debut, fin) selon le type de chaque lien.
+
+    FS : le successeur debute apres la FIN du predecesseur (+ decalage) ;
+    SS : il debute apres son DEBUT ; FF : il finit apres sa FIN ; SF : il finit
+    apres son DEBUT. Traiter tous les liens comme FS -- ce que faisait la
+    simulation jusqu'ici -- serialisait des taches paralleles : deux taches de
+    10 j liees debut-debut donnaient 20 j au lieu de 10. Aucune tache ne debute
+    avant le debut du projet (date 0).
+    """
+    debut, fin = {}, {}
+    for n in order:
+        duree = durees[n]
+        au_plus_tot = 0.0
+        for p in G.predecessors(n):
+            arc = G[p][n]
+            lag = arc.get("lag", 0.0)
+            genre = arc.get("type", "FS")
+            if genre == "SS":
+                borne = debut[p] + lag
+            elif genre == "FF":
+                borne = fin[p] + lag - duree
+            elif genre == "SF":
+                borne = debut[p] + lag - duree
+            else:
+                borne = fin[p] + lag
+            if borne > au_plus_tot:
+                au_plus_tot = borne
+        debut[n] = au_plus_tot
+        fin[n] = au_plus_tot + duree
+    return debut, fin
+
+
+def passage_arriere(G, order, durees, fin_projet):
+    """Dates de fin au plus tard, symetriques de passage_avant()."""
+    fin_tard = {}
+    for n in reversed(order):
+        duree = durees[n]
+        au_plus_tard = fin_projet
+        for s in G.successors(n):
+            arc = G[n][s]
+            lag = arc.get("lag", 0.0)
+            genre = arc.get("type", "FS")
+            if genre == "SS":
+                borne = fin_tard[s] - durees[s] - lag + duree
+            elif genre == "FF":
+                borne = fin_tard[s] - lag
+            elif genre == "SF":
+                borne = fin_tard[s] - lag + duree
+            else:
+                borne = fin_tard[s] - durees[s] - lag
+            if borne < au_plus_tard:
+                au_plus_tard = borne
+        fin_tard[n] = au_plus_tard
+    return fin_tard
+
+
 def early_finish_deterministe(G):
     """Dates de fin au plus tot avec les durees planifiees (most likely), sans aucun
     aleatoire : passage avant standard. Sert au resultat global comme au calcul de
     l'ecart par macro-tache."""
     order = list(nx.topological_sort(G))
-    early_finish = {n: 0.0 for n in G.nodes}
-    for n in order:
-        preds = list(G.predecessors(n))
-        early_start = max(
-            (early_finish[p] + G[p][n].get("lag", 0.0) for p in preds), default=0.0
-        )
-        early_finish[n] = early_start + G.nodes[n]["m"]
+    _, early_finish = passage_avant(G, order, {n: G.nodes[n]["m"] for n in G.nodes})
     return early_finish
 
 
@@ -284,28 +394,14 @@ def run_simulation(G, n_sims, rng, macros=None, seed_report_every=1000):
             n: sample_pert(G.nodes[n]["o"], G.nodes[n]["m"], G.nodes[n]["p"], rng)
             for n in G.nodes
         }
-        early_start = {n: 0.0 for n in G.nodes}
-        early_finish = {n: 0.0 for n in G.nodes}
-
-        for n in order:
-            preds = list(G.predecessors(n))
-            if preds:
-                early_start[n] = max(early_finish[p] + G[p][n].get("lag", 0.0) for p in preds)
-            early_finish[n] = early_start[n] + sampled_dur[n]
+        _, early_finish = passage_avant(G, order, sampled_dur)
 
         project_finish = max(early_finish.values()) if early_finish else 0.0
         finish_dates[i] = project_finish
 
         # chemin critique de cette iteration : taches sans marge, calcule par
         # un passage arriere (backward pass) standard CPM
-        late_finish = {n: project_finish for n in G.nodes}
-        for n in reversed(order):
-            succs = list(G.successors(n))
-            if succs:
-                late_finish[n] = min(
-                    late_finish[s] - sampled_dur[s] - G[n][s].get("lag", 0.0)
-                    for s in succs
-                )
+        late_finish = passage_arriere(G, order, sampled_dur, project_finish)
         critiques_iteration = set() if macros else None
         for n in G.nodes:
             slack = late_finish[n] - early_finish[n]
@@ -432,7 +528,11 @@ def main():
     except Exception:
         PROJECT_CALENDAR = None
 
-    estimates = load_estimates_csv(args.estimates) if args.estimates else {}
+    try:
+        estimates = load_estimates_csv(args.estimates) if args.estimates else {}
+    except EstimationsInvalides as exc:
+        print(f"{MARQUEUR_ESTIMATIONS} {exc}", file=sys.stderr)
+        sys.exit(2)
     G, n_links, gelees = build_graph(proj, args.opt, args.pess, estimates)
 
     print("=" * 72)
@@ -448,7 +548,6 @@ def main():
     # « Taches hors lot » ceux qui ne dependent d'aucune recapitulative du niveau
     # demande : la vue reste ainsi complete.
     macros = None
-    hors_lot = []
     if args.macro_level is not None:
         groupes = build_macro_groups(proj, args.macro_level)
         macros = {}
@@ -458,13 +557,13 @@ def main():
             if presents:
                 macros[uid] = (nom, presents)
                 couverts.update(presents)
-        hos_lot = [n for n in G.nodes if n not in couverts]
+        hors_lot = [n for n in G.nodes if n not in couverts]
         if not macros:
             # Aucune recapitulative a ce niveau : message dedie, sans fabriquer un
             # groupe « hors lot » qui contiendrait tout le planning.
             macros = None
-        elif hos_lot:
-            macros["hors_lot"] = ("Taches hors lot", hos_lot)
+        elif hors_lot:
+            macros["hors_lot"] = ("Taches hors lot", hors_lot)
 
     if n_links == 0:
         print()

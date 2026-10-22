@@ -5,6 +5,51 @@ Les versions antérieures à la v1.6.0 sont documentées dans les
 
 ## v1.14.0 — branche `dev/montecarlo-macro` (non publiée)
 
+### Corrigé — audit du 22/10/2026
+- **Injection de formules dans les exports** : un nom de tâche ou de lot
+  commençant par `=`, `+`, `-` ou `@` devenait une formule active dans le
+  classeur Excel (XlsxWriter écrit par défaut ces chaînes en formules) et dans
+  le CSV. Le classeur écrit désormais tout en texte, sans lien automatique, et
+  le CSV préfixe ces cellules d'une apostrophe.
+- **Monte Carlo : types de liens** : les liens SS, FF et SF étaient tous traités
+  comme FS. Sur `tests/test_liens.xml`, la durée CPM passe de 25 j à **22 j**
+  (valeur juste), et la tâche liée début-début avec 6 j de marge n'est plus
+  critique. **Les résultats changent sur tout planning comportant des liens
+  non FS** ; ils sont inchangés pour un réseau 100 % FS (référence
+  `ref_mc.txt` identique).
+- **CPLI (contrôle 13)** : longueur du chemin critique mesurée par son étendue
+  (et non la somme des durées des tâches critiques), marge prise sur le chemin
+  le plus en retard. Deux chemins parallèles de 20 j en retard de 3 j : 0,85
+  au lieu de 0,93 ; avec 30 j de chemin, le verdict passait à tort à « OK »
+  (0,95 au lieu de 0,90).
+- **Contraintes dures (contrôle 5)** : « Début au plus tard le » (SNLT) et
+  « Fin au plus tard le » (FNLT) sont comptées, comme le prescrit le DCMA.
+- **Concurrence** : un créneau d'analyse n'est plus purgé au bout de
+  `ANALYSIS_TIMEOUT + 120` s alors qu'une analyse « les deux » peut durer deux
+  fois le délai ; seuil porté à `2 × (ANALYSIS_TIMEOUT + 20) + 120` s.
+- **Quota** : un dépassement de délai ou de mémoire est décompté (le visiteur
+  en est prévenu) — un fichier pathologique ne peut plus occuper les créneaux
+  en boucle sans limite.
+- **Quota contournable** en accès direct au port 5000 par un `X-Forwarded-For`
+  forgé : nouvelle variable `TRUSTED_PROXIES`, qui limite la lecture de cet
+  en-tête aux requêtes du reverse proxy.
+- **Arrêt d'une analyse « les deux »** pendant la simulation : la page annonçait
+  qu'aucune analyse n'était décomptée alors que le diagnostic terminé l'était.
+- **Options Monte Carlo** : `nan` et `inf` étaient acceptés ; le serveur borne
+  désormais les simulations à 10 000 (maximum du formulaire, contre 50 000) et
+  les facteurs à optimiste ≤ 1 ≤ pessimiste ≤ 10.
+- **CSV d'estimations** : une valeur probable hors de [optimiste, pessimiste]
+  faisait planter la simulation (`ValueError b <= 0`) ; le fichier est refusé
+  avec la ligne en cause. Séparateur `;`, virgule décimale et BOM acceptés.
+- **En-têtes de sécurité** : CSP à jeton pour les scripts, `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
+- README : `MAX_UPLOAD_MB` vaut 5 Mo en production (le README annonçait 20).
+
+### Tests
+- `check_mppcr.py` : 344 vérifications (24 nouvelles, dont 6 sur
+  `tests/test_liens.xml` exécutées avec MPXJ) ; test du smoke test CI remis à
+  jour (`card score-hero`, classe de la maquette v2).
+
 ### Ajouté
 - **Répartition du risque par lot dans l'interface** (l'option
   `montecarlo.py --macro-level N` existait depuis la v1.12.0 mais n'était

