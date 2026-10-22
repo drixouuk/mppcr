@@ -49,4 +49,4 @@ Documentation de référence : [`README.md`](README.md) (contrôles, score, mém
 - `tests/test_liens.xml` : planning de test des liens SS/FF, de la contrainte SNLT et du CPLI (deux chemins critiques parallèles en retard de 3 j) ; ses valeurs attendues (CPM 22 j, CPLI 0,85, SNLT 1/7) sont vérifiées par `check_mppcr.py`.
 - `TRUSTED_PROXIES` (adresse de NPMplus) ferme le contournement du quota par `X-Forwarded-For` en accès direct au port 5000 — à n'activer qu'après avoir vérifié l'adresse source vue par le conteneur, sinon tous les visiteurs partagent un seul quota.
 - `.gitignore` exclut `*.mpp` : seul `tests/planning_ci.mpp` (synthétique) est réintégré par une exception.
-- État git au 22/10/2026 : `main` = **v1.14.0** (répartition par lot + corrections de l'audit du 22/10, voir `CHANGELOG.md`) ; `dev/montecarlo-macro` et `fix/audit-2026-10` sont fusionnées dans `main`.
+- État git au 22/10/2026 : `main` = **v1.15.0** (prévision datée, moteur vectorisé, comparaison, rapport PDF, authentification facultative, ergonomie ; voir `CHANGELOG.md`). Production CT 121 : v1.14.0 tant qu'elle n'est pas mise à jour.

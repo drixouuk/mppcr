@@ -3,7 +3,7 @@
 Les versions antérieures à la v1.6.0 sont documentées dans les
 [releases GitHub](https://github.com/drixouuk/mppcr/releases).
 
-## v1.15.0 (en cours)
+## v1.15.0
 
 ### Ajouté
 - **Fin prévisionnelle** depuis la date d'état : reste à faire simulé, dates de fin
