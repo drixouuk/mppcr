@@ -577,8 +577,8 @@ Trois vérifications, à lancer avant toute publication :
 | `verify_prod.sh` | production réelle : conteneur, HTTP, répartition par lot, exports, refus, charge, absence de résidu | 62 |
 
 Les deux premières tournent **dans l'image de production** (seul environnement qui
-embarque Flask, JPype, MPXJ et Java) : `lancer_lxc.sh` y copie le code de staging
-et le harnais, puis exécute la commande demandée. `verify_prod.sh` interroge le
+embarque Flask, JPype, MPXJ et Java) : `tests/lancer_lxc.sh` y copie le code du dépôt
+et le harnais (`tests/`), puis exécute la commande demandée. `verify_prod.sh` interroge le
 conteneur en fonctionnement sur `http://127.0.0.1:5000`.
 
 Les sorties de `dcma14.py` et `montecarlo.py` sont comparées **pour de vrai** aux

@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MPPCR — Redesign v2 (maquette)</title>
+<style>
+/* ============================================================
+   MPPCR v2 — Design tokens
+   ============================================================ */
+:root{
+  --bg:#F4F6F9;
+  --surface:#FFFFFF;
+  --surface-2:#F9FAFB;
+  --border:#E4E7EC;
+  --border-strong:#D0D5DD;
+  --text:#101828;
+  --text-2:#475467;
+  --text-3:#667085;
+  --text-4:#98A2B3;
+
+  --primary:#2E5BFF;
+  --primary-dark:#1E40D8;
+  --primary-soft:#EEF2FF;
+
+  --ok:#12B76A;        --ok-bg:#ECFDF3;   --ok-border:#A6F4C5;
+  --ko:#F04438;        --ko-bg:#FEF3F2;   --ko-border:#FECDCA;
+  --warn:#DC6803;      --warn-bg:#FFFAEB; --warn-border:#FEDF89;
+  --na:#475467;        --na-bg:#F2F4F7;   --na-border:#E4E7EC;
+
+  --r-sm:8px; --r-md:12px; --r-lg:16px;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06);
+  --shadow-md:0 4px 12px -2px rgba(16,24,40,.10);
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono","SFMono-Regular",Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.container{max-width:1120px;margin:0 auto;padding:0 24px}
+h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:17px;font-weight:650}
+h3{font-size:14px;font-weight:650}
+.muted{color:var(--text-2)}
+.small{font-size:13px}
+.mono{font-family:var(--mono);font-size:.92em}
+
+/* ============================================================
+   Header
+   ============================================================ */
+header.top{
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:50;
+}
+.top-inner{display:flex;align-items:center;gap:20px;height:60px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--text)}
+.brand-mark{
+  width:34px;height:34px;border-radius:9px;
+  background:linear-gradient(135deg,#2E5BFF 0%,#1E40D8 100%);
+  color:#fff;font-weight:800;font-size:15px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 6px rgba(46,91,255,.35);
+}
+.brand-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
+.brand-sub{font-size:12px;color:var(--text-3);font-weight:500}
+.version-tag{
+  font-size:11.5px;font-weight:600;color:var(--text-3);
+  background:var(--surface-2);border:1px solid var(--border);
+  padding:2px 8px;border-radius:99px;
+}
+/* Stepper */
+.stepper{margin-left:auto;display:flex;align-items:center;gap:4px}
+.step{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:99px;text-decoration:none;color:var(--text-3);font-size:13px;font-weight:550;transition:.15s}
+.step .n{
+  width:20px;height:20px;border-radius:50%;
+  background:var(--surface-2);border:1.5px solid var(--border-strong);
+  color:var(--text-3);font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+}
+.step.active{background:var(--primary-soft);color:var(--primary-dark)}
+.step.active .n{background:var(--primary);border-color:var(--primary);color:#fff}
+.step.done{color:var(--ok)}
+.step.done .n{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.step-sep{color:var(--border-strong);font-size:12px}
+
+/* CSS-only view switch (maquette) */
+#view-toggle{display:none}
+main .view{display:none}
+#tab-form:checked ~ main #view-form{display:block}
+#tab-result:checked ~ main #view-result{display:block}
+#tab-form:checked ~ header .step-form,
+#tab-result:checked ~ header .step-result{background:var(--primary-soft);color:var(--primary-dark)}
+#tab-form:checked ~ header .step-form .n,
+#tab-result:checked ~ header .step-result .n{background:var(--primary);border-color:var(--primary);color:#fff}
+
+/* ============================================================
+   Page head
+   ============================================================ */
+.page-head{padding:36px 0 8px}
+.page-head h1{margin-bottom:4px}
+.page-head p{color:var(--text-2)}
+
+/* ============================================================
+   Form — 3 steps layout
+   ============================================================ */
+.form-grid{display:grid;grid-template-columns:1fr 360px;gap:24px;padding:20px 0 64px;align-items:start}
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);box-shadow:var(--shadow-sm);
+}
+.card-pad{padding:22px 24px}
+.step-label{
+  display:flex;align-items:center;gap:10px;margin-bottom:16px;
+}
+.step-num{
+  width:26px;height:26px;border-radius:8px;flex:none;
+  background:var(--primary-soft);color:var(--primary-dark);
+  font-size:13px;font-weight:750;display:flex;align-items:center;justify-content:center;
+}
+/* Dropzone */
+.dropzone{
+  border:2px dashed var(--border-strong);border-radius:var(--r-md);
+  background:var(--surface-2);
+  padding:44px 24px;text-align:center;cursor:pointer;
+  transition:border-color .15s, background .15s;
+}
+.dropzone:hover{border-color:var(--primary);background:var(--primary-soft)}
+.dz-icon{
+  width:52px;height:52px;border-radius:14px;margin:0 auto 14px;
+  background:var(--surface);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:var(--shadow-sm);
+}
+.dz-title{font-size:15.5px;font-weight:600}
+.dz-title b{color:var(--primary)}
+.dz-hint{font-size:13px;color:var(--text-3);margin-top:4px}
+.dz-file{
+  margin-top:14px;display:inline-flex;align-items:center;gap:8px;
+  background:var(--surface);border:1px solid var(--ok-border);
+  padding:6px 14px;border-radius:99px;font-size:13px;font-weight:600;color:var(--ok);
+}
+.privacy-note{
+  margin-top:14px;display:flex;gap:10px;align-items:flex-start;
+  font-size:12.5px;color:var(--text-3);
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--r-sm);padding:10px 14px;
+}
+.privacy-note svg{flex:none;margin-top:1px}
+
+/* Analysis type radio cards */
+.type-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.type-card{position:relative}
+.type-card input{position:absolute;opacity:0;pointer-events:none}
+.type-card label{
+  display:block;border:1.5px solid var(--border);border-radius:var(--r-md);
+  padding:16px;cursor:pointer;background:var(--surface);
+  transition:border-color .15s, box-shadow .15s, background .15s;height:100%;
+}
+.type-card label:hover{border-color:var(--border-strong)}
+.type-card input:checked + label{
+  border-color:var(--primary);background:var(--primary-soft);
+  box-shadow:0 0 0 3px rgba(46,91,255,.12);
+}
+.type-card input:focus-visible + label{outline:2px solid var(--primary);outline-offset:2px}
+.type-title{display:flex;align-items:center;gap:9px;font-weight:650;font-size:14px;margin-bottom:5px}
+.type-title .radio{
+  width:17px;height:17px;border-radius:50%;border:2px solid var(--border-strong);
+  flex:none;position:relative;transition:.15s;background:#fff;
+}
+.type-card input:checked + label .radio{border-color:var(--primary)}
+.type-card input:checked + label .radio::after{
+  content:"";position:absolute;inset:3px;border-radius:50%;background:var(--primary);
+}
+.type-desc{font-size:12.5px;color:var(--text-2);line-height:1.45}
+
+/* Options (details) */
+details.opt{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+details.opt + details.opt{margin-top:10px}
+details.opt summary{
+  list-style:none;cursor:pointer;padding:14px 18px;
+  display:flex;align-items:center;gap:10px;
+  font-weight:600;font-size:13.5px;color:var(--text);
+}
+details.opt summary::-webkit-details-marker{display:none}
+details.opt summary .chev{margin-left:auto;color:var(--text-3);transition:transform .15s}
+details.opt[open] summary .chev{transform:rotate(90deg)}
+details.opt summary:hover{color:var(--primary-dark)}
+.opt-body{padding:2px 18px 18px;border-top:1px solid var(--border)}
+.check-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px dashed var(--border)}
+.check-row:last-child{border-bottom:none}
+.check-row input{width:17px;height:17px;accent-color:var(--primary)}
+.check-row .lbl{font-weight:550;font-size:13.5px}
+.check-row .sub{font-size:12px;color:var(--text-3)}
+.field label{display:block;font-size:12.5px;font-weight:600;color:var(--text-2);margin:12px 0 6px}
+.field select,.field input[type=number],.field input[type=file]{
+  width:100%;padding:9px 12px;border:1px solid var(--border-strong);
+  border-radius:var(--r-sm);font-size:13.5px;font-family:inherit;background:#fff;color:var(--text);
+}
+.field select:focus,.field input:focus{outline:2px solid var(--primary);outline-offset:1px;border-color:var(--primary)}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* Sticky CTA panel */
+.cta-panel{position:sticky;top:84px}
+.cta-panel .card-pad{padding:20px}
+.cta-summary{font-size:13px;color:var(--text-2);margin-bottom:14px}
+.cta-summary b{color:var(--text)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  border-radius:var(--r-sm);font-weight:600;font-size:14.5px;
+  padding:12px 20px;cursor:pointer;border:1px solid transparent;
+  text-decoration:none;transition:.15s;font-family:inherit;width:100%;
+}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 2px 8px rgba(46,91,255,.3)}
+.btn-primary:hover{background:var(--primary-dark);box-shadow:0 4px 14px rgba(46,91,255,.4)}
+.btn-ghost{background:var(--surface);border-color:var(--border-strong);color:var(--text-2)}
+.btn-ghost:hover{border-color:var(--text-4);color:var(--text)}
+.btn-sm{padding:8px 14px;font-size:13px;width:auto}
+.quota{
+  margin-top:14px;display:flex;align-items:center;gap:9px;
+  font-size:12.5px;color:var(--text-3);
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--r-sm);padding:10px 13px;
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px var(--ok-bg)}
+.confid{margin-top:10px;font-size:12px;color:var(--text-4);display:flex;gap:8px;align-items:center}
+
+/* ============================================================
+   RESULT PAGE
+   ============================================================ */
+.result-head{padding:28px 0 4px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.back-link{
+  display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+  color:var(--text-2);text-decoration:none;margin-bottom:10px;
+}
+.back-link:hover{color:var(--primary)}
+.file-chip{
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:99px;padding:6px 14px;font-size:13px;font-weight:600;
+}
+.file-chip .ext{color:var(--primary);font-weight:750}
+.meta-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.meta-chip{
+  font-size:12.5px;color:var(--text-2);background:var(--surface);
+  border:1px solid var(--border);border-radius:99px;padding:4px 12px;
+}
+.meta-chip b{color:var(--text);font-weight:700}
+.head-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+
+/* Score hero */
+.score-hero{margin-top:18px;overflow:hidden}
+.score-hero-inner{display:grid;grid-template-columns:230px 1fr;gap:0}
+.score-left{
+  padding:26px 28px;border-right:1px solid var(--border);
+  background:linear-gradient(160deg,#FFFAEB 0%,#FEF3F2 100%);
+}
+.score-num{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.score-num span{font-size:20px;font-weight:600;color:var(--text-3)}
+.band-badge{
+  display:inline-flex;align-items:center;gap:6px;margin-top:8px;
+  font-size:12.5px;font-weight:700;padding:3px 11px;border-radius:99px;
+  background:rgba(240,68,56,.12);color:#B42318;
+}
+.band-badge .bdot{width:7px;height:7px;border-radius:50%;background:#F04438}
+.score-right{padding:24px 28px}
+.score-bar-wrap{margin:14px 0 8px}
+.score-bar{
+  height:12px;border-radius:99px;background:var(--surface-2);
+  border:1px solid var(--border);position:relative;overflow:hidden;
+}
+.score-fill{
+  height:100%;border-radius:99px;width:60%;
+  background:linear-gradient(90deg,#F79009,#F04438);
+}
+.score-ticks{position:relative;height:16px;margin-top:5px}
+.tick{position:absolute;font-size:10.5px;color:var(--text-4);transform:translateX(-50%)}
+.tick::before{content:"";position:absolute;top:-5px;left:50%;width:1px;height:5px;background:var(--border-strong)}
+.score-formula{font-size:12.5px;color:var(--text-3);margin-top:8px}
+
+/* KPI strip */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:16px}
+.kpi{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:16px 18px;box-shadow:var(--shadow-sm);
+  border-top:3px solid var(--border-strong);
+}
+.kpi.k-ok{border-top-color:var(--ok)} .kpi.k-ko{border-top-color:var(--ko)}
+.kpi.k-na{border-top-color:var(--na)} .kpi.k-info{border-top-color:var(--primary)}
+.kpi .k-label{font-size:11.5px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)}
+.kpi .k-val{font-size:30px;font-weight:750;letter-spacing:-.02em;margin-top:3px;line-height:1.15}
+.kpi .k-sub{font-size:12px;color:var(--text-3)}
+
+/* Alerts */
+.alert{
+  display:flex;gap:13px;align-items:flex-start;
+  border-radius:var(--r-md);padding:15px 18px;margin-top:16px;
+  font-size:13.5px;border:1px solid;
+}
+.alert .a-icon{flex:none;margin-top:1px}
+.alert-warn{background:var(--warn-bg);border-color:var(--warn-border);color:#93370D}
+.alert-danger{background:var(--ko-bg);border-color:var(--ko-border);color:#B42318}
+.alert-info{background:var(--primary-soft);border-color:#C7D7FE;color:#1E40D8}
+.alert b{font-weight:700}
+.alert .alert-action{
+  margin-left:auto;flex:none;align-self:center;
+  background:var(--surface);border:1px solid currentColor;border-radius:var(--r-sm);
+  padding:7px 14px;font-size:12.5px;font-weight:650;cursor:pointer;color:inherit;
+  font-family:inherit;white-space:nowrap;
+}
+.alert .alert-action:hover{background:rgba(0,0,0,.04)}
+
+/* Section titles */
+.sec-title{
+  display:flex;align-items:center;gap:12px;margin:34px 0 14px;
+}
+.sec-title h2{letter-spacing:-.01em}
+.sec-title .count{
+  font-size:12px;font-weight:700;background:var(--surface);border:1px solid var(--border);
+  color:var(--text-2);border-radius:99px;padding:2px 10px;
+}
+.sec-title .right{margin-left:auto}
+
+/* Priorities */
+details.prio{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);box-shadow:var(--shadow-sm)}
+details.prio + details.prio{margin-top:10px}
+details.prio summary{
+  list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;
+  padding:15px 18px;
+}
+details.prio summary::-webkit-details-marker{display:none}
+.prio-rank{
+  width:30px;height:30px;border-radius:9px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:750;
+}
+.pr-ko{background:var(--ko-bg);color:#B42318}
+.pr-warn{background:var(--warn-bg);color:#93370D}
+.pr-na{background:var(--na-bg);color:var(--text-2)}
+.prio-name{font-weight:650;font-size:14px}
+.prio-metric{font-size:12.5px;color:var(--text-3);margin-top:1px}
+.prio-chev{margin-left:auto;color:var(--text-3)}
+.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px;
+  border:1px solid;white-space:nowrap;
+}
+.b-ko{background:var(--ko-bg);color:#B42318;border-color:var(--ko-border)}
+.b-warn{background:var(--warn-bg);color:#93370D;border-color:var(--warn-border)}
+.b-ok{background:var(--ok-bg);color:#067647;border-color:var(--ok-border)}
+.b-na{background:var(--na-bg);color:var(--text-2);border-color:var(--na-border)}
+.b-info{background:var(--primary-soft);color:var(--primary-dark);border-color:#C7D7FE}
+.prio-body{padding:14px 18px 16px 62px;border-top:1px solid var(--border);font-size:13.5px;color:var(--text-2)}
+.prio-body .reco{font-weight:600;color:var(--text);margin-bottom:10px}
+.task-ids{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.task-id{
+  font-family:var(--mono);font-size:11.5px;font-weight:600;
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:6px;padding:2px 8px;color:var(--text-2);
+}
+
+/* Controls table */
+.table-card{overflow:hidden}
+.table-scroll{overflow-x:auto}
+table.ctrl{width:100%;border-collapse:collapse;font-size:13px;min-width:860px}
+table.ctrl thead th{
+  text-align:left;font-size:11.5px;font-weight:650;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--text-3);background:var(--surface-2);
+  padding:11px 16px;border-bottom:1px solid var(--border);
+  position:sticky;top:0;
+}
+table.ctrl td{padding:13px 16px;border-bottom:1px solid var(--border);vertical-align:top}
+table.ctrl tbody tr:last-child td{border-bottom:none}
+table.ctrl tbody tr:hover{background:var(--surface-2)}
+td.ctrl-name{font-weight:650;color:var(--text);white-space:nowrap}
+td .frac{display:block;font-size:11.5px;color:var(--text-3);font-weight:500}
+td.ctrl-result{font-weight:700;white-space:nowrap}
+td.ctrl-target{color:var(--text-3);white-space:nowrap}
+td.ctrl-action{color:var(--text-2);max-width:340px}
+.row-ko{background:rgba(254,243,242,.35)}
+
+/* Monte Carlo */
+.mc-durations{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.dur-card{
+  background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r-md);
+  padding:18px 20px;position:relative;
+}
+.dur-card .d-label{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+.dur-card .d-val{font-size:32px;font-weight:800;letter-spacing:-.02em;margin-top:4px}
+.dur-card .d-val small{font-size:15px;font-weight:600;color:var(--text-3)}
+.dur-card .d-delta{font-size:12.5px;font-weight:650;margin-top:2px}
+.dur-card.reco{border-color:var(--ok);box-shadow:0 0 0 3px rgba(18,183,106,.12)}
+.dur-card.reco::after{
+  content:"Recommandé";position:absolute;top:-11px;right:14px;
+  background:var(--ok);color:#fff;font-size:10.5px;font-weight:700;
+  letter-spacing:.04em;text-transform:uppercase;
+  padding:3px 10px;border-radius:99px;
+}
+.dur-card.ref{background:var(--surface-2)}
+.d-up{color:#B42318}.d-dn{color:#067647}.d-ref{color:var(--text-3);font-weight:500}
+
+/* Distribution axis */
+.axis-card{margin-top:14px;padding:26px 28px 20px}
+.axis{position:relative;height:8px;border-radius:99px;background:var(--surface-2);border:1px solid var(--border);margin:34px 10px 6px}
+.axis-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,#C7D7FE,#2E5BFF);opacity:.55}
+.marker{position:absolute;top:-26px;transform:translateX(-50%);text-align:center}
+.marker .m-val{font-size:12px;font-weight:750}
+.marker .m-lab{font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.marker::after{
+  content:"";position:absolute;top:20px;left:50%;transform:translateX(-50%);
+  width:2px;height:14px;background:var(--text-3);
+}
+.marker.m-cpm::after{background:var(--text-4)}
+.m-cpm .m-val{color:var(--text-3)}
+.m-p80 .m-val{color:var(--ok)}
+.axis-caption{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-4);padding:2px 10px}
+.mc-meta{font-size:12.5px;color:var(--text-3);margin-top:16px;padding-top:14px;border-top:1px dashed var(--border)}
+
+/* Decision callout */
+.callout{
+  margin-top:14px;display:flex;gap:13px;
+  background:var(--primary-soft);border:1px solid #C7D7FE;
+  border-radius:var(--r-md);padding:16px 18px;font-size:13.5px;color:#1E3A8A;
+}
+.callout .c-icon{flex:none;margin-top:1px}
+.callout b{color:#1E40D8}
+
+/* Criticality */
+.crit-list{padding:8px 0}
+.crit-row{display:grid;grid-template-columns:70px 1fr 62px;align-items:center;gap:14px;padding:7px 24px}
+.crit-row:hover{background:var(--surface-2)}
+.crit-id{font-family:var(--mono);font-size:12px;font-weight:650;color:var(--text-2)}
+.crit-bar{height:16px;border-radius:5px;background:var(--surface-2);overflow:hidden;position:relative}
+.crit-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#F79009,#F04438)}
+.crit-fill.hot{background:linear-gradient(90deg,#F04438,#D92D20)}
+.crit-val{font-size:12.5px;font-weight:700;text-align:right;color:var(--text-2)}
+.crit-note{
+  margin:10px 24px 16px;font-size:12.5px;color:var(--text-3);
+  display:flex;align-items:center;gap:8px;background:var(--warn-bg);
+  border:1px solid var(--warn-border);border-radius:var(--r-sm);padding:9px 13px;
+}
+
+/* Tabs inside results (DCMA / MC) */
+.subnav{display:flex;gap:4px;margin-top:26px;border-bottom:1px solid var(--border)}
+.subnav a{
+  padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--text-3);
+  text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;
+}
+.subnav a.active{color:var(--primary);border-bottom-color:var(--primary)}
+
+/* Legend */
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--text-3);align-items:center}
+.legend .li{display:flex;align-items:center;gap:6px}
+.lg{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+/* Footer */
+footer{border-top:1px solid var(--border);margin-top:56px;background:var(--surface)}
+.foot-inner{display:flex;align-items:center;gap:18px;padding:20px 0;font-size:12.5px;color:var(--text-3);flex-wrap:wrap}
+.foot-inner .sep{color:var(--border-strong)}
+.foot-inner .right{margin-left:auto;display:flex;gap:14px;align-items:center}
+
+/* Responsive */
+@media(max-width:960px){
+  .form-grid{grid-template-columns:1fr}
+  .cta-panel{position:static}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  .mc-durations{grid-template-columns:repeat(2,1fr)}
+  .type-grid{grid-template-columns:1fr}
+  .score-hero-inner{grid-template-columns:1fr}
+  .score-left{border-right:none;border-bottom:1px solid var(--border)}
+  .stepper .step .s-lab{display:none}
+  .brand-sub{display:none}
+  .head-actions{margin-left:0}
+}
+@media(max-width:640px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .mc-durations{grid-template-columns:1fr}
+  .container{padding:0 16px}
+  .crit-row{grid-template-columns:56px 1fr 54px;gap:8px;padding:7px 16px}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Maquette: bascule de vue (sans JS) ===== -->
+<input type="radio" name="tab" id="tab-form" checked>
+<input type="radio" name="tab" id="tab-result">
+
+<!-- ================= HEADER ================= -->
+<header class="top">
+  <div class="container top-inner">
+    <a class="brand" href="#">
+      <span class="brand-mark">M</span>
+      <span>
+        <span class="brand-name">MPPCR</span><br>
+        <span class="brand-sub">MS Project Check &amp; Risk</span>
+      </span>
+    </a>
+    <span class="version-tag">v2.0.0-maquette</span>
+
+    <nav class="stepper">
+      <label class="step step-form" for="tab-form"><span class="n">1</span><span class="s-lab">Nouvelle analyse</span></label>
+      <span class="step-sep">›</span>
+      <label class="step step-result" for="tab-result"><span class="n">2</span><span class="s-lab">Diagnostic DCMA-14</span></label>
+      <span class="step-sep">›</span>
+      <span class="step"><span class="n">3</span><span class="s-lab">Monte Carlo</span></span>
+    </nav>
+  </div>
+</header>
+
+<main>
+<!-- ============================================================
+     VUE 1 — FORMULAIRE
+     ============================================================ -->
+<section class="view" id="view-form">
+  <div class="container">
+    <div class="page-head">
+      <h1>Analyser un planning</h1>
+      <p>Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur un fichier MS&nbsp;Project (.mpp).</p>
+    </div>
+
+    <div class="form-grid">
+      <div>
+        <!-- Étape 1 : fichier -->
+        <div class="card card-pad">
+          <div class="step-label"><span class="step-num">1</span><h2>Fichier planning</h2></div>
+          <div class="dropzone" role="button" tabindex="0" aria-label="Déposer un fichier .mpp">
+            <div class="dz-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2E5BFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="dz-title"><b>Glissez-déposez</b> votre planning ici, ou <b>parcourez</b> vos fichiers</div>
+            <div class="dz-hint">.mpp uniquement · 20 Mo max</div>
+            <div class="dz-file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              CapteursNew3.mpp · 4,2 Mo
+            </div>
+          </div>
+          <div class="privacy-note">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#667085" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Votre planning est analysé dans un répertoire temporaire supprimé en fin de requête : <b>aucun fichier n'est conservé</b>. Les plannings volumineux demandent beaucoup de mémoire et peuvent être refusés.</span>
+          </div>
+        </div>
+
+        <!-- Étape 2 : type d'analyse -->
+        <div class="card card-pad" style="margin-top:16px">
+          <div class="step-label"><span class="step-num">2</span><h2>Analyse à exécuter</h2></div>
+          <div class="type-grid">
+            <div class="type-card">
+              <input type="radio" name="analysis" id="a1">
+              <label for="a1">
+                <div class="type-title"><span class="radio"></span>Diagnostic qualité DCMA-14</div>
+                <div class="type-desc">14 contrôles avec cibles et actions recommandées.</div>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="analysis" id="a2">
+              <label for="a2">
+                <div class="type-title"><span class="radio"></span>Simulation Monte Carlo</div>
+                <div class="type-desc">P50 / P80 / P90, contingence recommandée, criticité des tâches.</div>
+              </label>
+            </div>
+            <div class="type-card">
+              <input type="radio" name="analysis" id="a3" checked>
+              <label for="a3">
+                <div class="type-title"><span class="radio"></span>Les deux</div>
+                <div class="type-desc">Qualité DCMA puis risque planning. Recommandé.</div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Étape 3 : options -->
+        <div style="margin-top:16px">
+          <details class="opt">
+            <summary>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export des résultats <span style="font-weight:400;color:var(--text-3)">(facultatif)</span>
+              <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </summary>
+            <div class="opt-body">
+              <div class="check-row">
+                <input type="checkbox" id="e1" checked>
+                <span><span class="lbl">CSV</span><br><span class="sub">Séparateur « ; », BOM UTF-8 — compatible Excel FR</span></span>
+              </div>
+              <div class="check-row">
+                <input type="checkbox" id="e2">
+                <span><span class="lbl">Excel (.xlsx)</span><br><span class="sub">Une feuille par analyse, verdicts colorés, score en tête</span></span>
+              </div>
+              <p class="small muted" style="margin-top:10px">Pour un PDF : <b>Imprimer → Enregistrer au format PDF</b> depuis la page de résultat.</p>
+            </div>
+          </details>
+
+          <details class="opt">
+            <summary>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+              Options avancées Monte Carlo
+              <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </summary>
+            <div class="opt-body">
+              <div class="field-row">
+                <div class="field">
+                  <label for="sims">Nombre de simulations</label>
+                  <select id="sims">
+                    <option>1 000 (rapide, exploratoire)</option>
+                    <option selected>5 000 (recommandé)</option>
+                    <option>10 000 (précis, plus long)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="factors">Facteurs PERT (optimiste / pessimiste)</label>
+                  <select id="factors">
+                    <option selected>0,8 / 1,5 (défaut)</option>
+                    <option>0,7 / 1,8 (plus prudent)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="est">Estimations 3 points (CSV facultatif)</label>
+                <input type="file" id="est" accept=".csv">
+                <p class="small muted" style="margin-top:6px">Format : <span class="mono">task_id,optimistic,most_likely,pessimistic</span> en jours.</p>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <!-- Panneau CTA -->
+      <aside class="cta-panel">
+        <div class="card">
+          <div class="card-pad">
+            <div class="cta-summary">
+              <b>CapteursNew3.mpp</b><br>
+              Diagnostic DCMA-14 + Monte Carlo<br>
+              5 000 simulations · aucun export
+            </div>
+            <label class="btn btn-primary" for="tab-result" style="cursor:pointer">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              Lancer l'analyse
+            </label>
+            <div class="quota">
+              <span class="dot"></span>
+              <span><b>5 analyses restantes</b> aujourd'hui pour votre adresse IP.</span>
+            </div>
+            <div class="confid">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Analyse chiffrée et exécutée localement, sans conservation.
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     VUE 2 — RÉSULTATS (DCMA-14 + Monte Carlo)
+     ============================================================ -->
+<section class="view" id="view-result">
+  <div class="container">
+
+    <div class="result-head">
+      <div>
+        <label class="back-link" for="tab-form" style="cursor:pointer">‹ Nouvelle analyse</label>
+        <div>
+          <span class="file-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            <span class="ext">.mpp</span> CapteursNew3
+          </span>
+          <span class="meta-chip" style="margin-left:8px">Date d'état : <b>12/09/2026 18:00</b></span>
+        </div>
+        <div class="meta-chips">
+          <span class="meta-chip"><b>463</b> tâches de détail</span>
+          <span class="meta-chip"><b>407</b> liens de dépendance</span>
+          <span class="meta-chip"><b>5 000</b> simulations</span>
+          <span class="meta-chip">Barème <b>v1</b></span>
+        </div>
+      </div>
+      <div class="head-actions">
+        <button class="btn btn-ghost btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          CSV
+        </button>
+        <button class="btn btn-ghost btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          Excel
+        </button>
+        <button class="btn btn-ghost btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer / PDF
+        </button>
+      </div>
+    </div>
+
+    <!-- Score hero -->
+    <div class="card score-hero">
+      <div class="score-hero-inner">
+        <div class="score-left">
+          <div class="k-label" style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#93370D">Score de conformité DCMA</div>
+          <div class="score-num">60<span>/100</span></div>
+          <span class="band-badge"><span class="bdot"></span>Fragile</span>
+        </div>
+        <div class="score-right">
+          <h3>7 conformes sur 9 contrôles évalués · 3 non évaluables</h3>
+          <div class="score-bar-wrap">
+            <div class="score-bar"><div class="score-fill"></div></div>
+            <div class="score-ticks">
+              <span class="tick" style="left:55%">55</span>
+              <span class="tick" style="left:70%">70</span>
+              <span class="tick" style="left:85%">85</span>
+            </div>
+          </div>
+          <div class="legend">
+            <span class="li"><span class="lg" style="background:#F04438"></span>&lt; 55 insuffisant</span>
+            <span class="li"><span class="lg" style="background:#F79009"></span>55–69 fragile</span>
+            <span class="li"><span class="lg" style="background:#84CC16"></span>70–84 acceptable</span>
+            <span class="li"><span class="lg" style="background:#12B76A"></span>≥ 85 conforme</span>
+          </div>
+          <p class="score-formula">Plafonné à 60 : date d'état du projet et baseline manquantes (78/100 avant plafond). <a href="#" style="color:var(--primary);font-weight:600;text-decoration:none">Comment ce score est calculé ↗</a></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="kpis">
+      <div class="kpi"><div class="k-label">Contrôles</div><div class="k-val">14</div><div class="k-sub">référentiel DCMA</div></div>
+      <div class="kpi k-ok"><div class="k-label">Conformes</div><div class="k-val" style="color:var(--ok)">7</div><div class="k-sub">cibles atteintes</div></div>
+      <div class="kpi k-ko"><div class="k-label">À corriger</div><div class="k-val" style="color:var(--ko)">2</div><div class="k-sub">prioritaires</div></div>
+      <div class="kpi k-na"><div class="k-label">N/A</div><div class="k-val" style="color:var(--na)">4</div><div class="k-sub">données manquantes</div></div>
+      <div class="kpi k-info"><div class="k-label">Info</div><div class="k-val" style="color:var(--primary)">1</div><div class="k-sub">indicateur</div></div>
+    </div>
+
+    <!-- Alert bloquant -->
+    <div class="alert alert-danger">
+      <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span><b>La logique de réseau est le point bloquant.</b> Tant que le contrôle Logic dépasse 5 %, le chemin critique, les marges et le Monte Carlo restent peu fiables.</span>
+      <button class="alert-action">Voir le contrôle 1</button>
+    </div>
+
+    <!-- Sub-nav résultats -->
+    <div class="subnav">
+      <a href="#diag" class="active">Diagnostic DCMA-14</a>
+      <a href="#mc">Monte Carlo</a>
+    </div>
+
+    <!-- ============ DIAGNOSTIC ============ -->
+    <div class="sec-title" id="diag"><h2>Priorités d'amélioration</h2><span class="count">6 actions</span></div>
+
+    <details class="prio" open>
+      <summary>
+        <span class="prio-rank pr-ko">01</span>
+        <span style="flex:1">
+          <span class="prio-name">Logic — tâches sans lien amont/aval</span>
+          <span class="prio-metric">94,7 % (18/19) · cible ≤ 5 %</span>
+        </span>
+        <span class="badge b-ko">À corriger</span>
+        <svg class="prio-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </summary>
+      <div class="prio-body">
+        <p class="reco">Priorité absolue : relier les 18 tâches à un prédécesseur et un successeur logiques. Sans cela, le chemin critique et le Monte Carlo ne sont pas fiables.</p>
+        <span class="small muted">Tâches concernées :</span>
+        <div class="task-ids">
+          <span class="task-id">4</span><span class="task-id">6</span><span class="task-id">7</span><span class="task-id">11</span><span class="task-id">12</span><span class="task-id">13</span><span class="task-id">15</span><span class="task-id">16</span><span class="task-id">17</span><span class="task-id">22</span><span class="task-id">23</span><span class="task-id">24</span><span class="task-id">25</span><span class="task-id">27</span><span class="task-id">30</span><span class="task-id">31</span><span class="task-id">33</span><span class="task-id">34</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="prio" style="margin-top:10px">
+      <summary>
+        <span class="prio-rank pr-na">02</span>
+        <span style="flex:1">
+          <span class="prio-name">Dates invalides (vs date d'état)</span>
+          <span class="prio-metric">Non évaluable · cible 0 %</span>
+        </span>
+        <span class="badge b-na">N/A</span>
+        <svg class="prio-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </summary>
+      <div class="prio-body">
+        <p class="reco">Renseigner la date d'état du projet pour activer ce contrôle (ainsi que les contrôles 9, 11 et 14).</p>
+      </div>
+    </details>
+
+    <details class="prio" style="margin-top:10px">
+      <summary>
+        <span class="prio-rank pr-warn">03</span>
+        <span style="flex:1">
+          <span class="prio-name">Baseline Execution Index (BEI)</span>
+          <span class="prio-metric">Non évaluable · cible ≥ 0,95</span>
+        </span>
+        <span class="badge b-na">N/A</span>
+        <svg class="prio-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </summary>
+      <div class="prio-body">
+        <p class="reco">Renseigner une baseline et une date d'état pour calculer le BEI.</p>
+      </div>
+    </details>
+
+    <div class="sec-title">
+      <h2>Détail des contrôles</h2><span class="count">14 contrôles</span>
+      <span class="right legend">
+        <span class="li"><span class="lg" style="background:var(--ok)"></span>Conforme</span>
+        <span class="li"><span class="lg" style="background:var(--ko)"></span>À corriger</span>
+        <span class="li"><span class="lg" style="background:var(--na)"></span>N/A</span>
+      </span>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-scroll">
+        <table class="ctrl">
+          <thead>
+            <tr>
+              <th style="width:210px">Contrôle</th>
+              <th>Résultat</th>
+              <th>Cible</th>
+              <th style="width:110px">Verdict</th>
+              <th>Action recommandée</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="row-ko">
+              <td class="ctrl-name">1. Logic <span class="frac">(tâches sans lien amont/aval)</span></td>
+              <td class="ctrl-result">94,7 %<span class="frac">18/19</span></td>
+              <td class="ctrl-target">≤ 5 %</td>
+              <td><span class="badge b-ko">À corriger</span></td>
+              <td class="ctrl-action">Relier les 18 tâches à un prédécesseur et un successeur logiques. Sans cela, le chemin critique et le Monte Carlo ne sont pas fiables.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">2. Leads <span class="frac">(lag négatif)</span></td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/0</span></td>
+              <td class="ctrl-target">0 %</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="ctrl-action">Aucun lead détecté.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">3. Lags <span class="frac">(lag positif)</span></td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/0</span></td>
+              <td class="ctrl-target">≤ 5 %</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="ctrl-action">Aucun lag positif détecté.</td>
+            </tr>
+            <tr class="row-ko">
+              <td class="ctrl-name">4. Relations Finish-to-Start</td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/0</span></td>
+              <td class="ctrl-target">≥ 90 %</td>
+              <td><span class="badge b-ko">À corriger</span></td>
+              <td class="ctrl-action">Analyser les liens non Finish-to-Start et convertir ceux qui ne correspondent pas à une logique réelle d'enchaînement.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">5. Contraintes dures</td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/19</span></td>
+              <td class="ctrl-target">≤ 5 % (idéal 0 %)</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="ctrl-action">Aucune contrainte dure détectée.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">6. Marge totale excessive <span class="frac">(plus de 44 j)</span></td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/19</span></td>
+              <td class="ctrl-target">≤ 5 %</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="ctrl-action">Les marges restent dans la tolérance.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">7. Marge totale négative</td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/19</span></td>
+              <td class="ctrl-target">0 %</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="ctrl-action">Aucune marge négative.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">8. Durée excessive <span class="frac">(plus de 44 j)</span></td>
+              <td class="ctrl-result">0,0 %<span class="frac">0/19</span></td>
+              <td class="ctrl-target">≤ 5 %</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="ctrl-action">Les durées restent dans la tolérance.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">9. Dates invalides <span class="frac">(vs date d'état)</span></td>
+              <td class="ctrl-result">N/A</td>
+              <td class="ctrl-target">0 %</td>
+              <td><span class="badge b-na">N/A</span></td>
+              <td class="ctrl-action">Renseigner la date d'état du projet pour contrôler la cohérence des dates.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">10. Tâches de détail sans ressource</td>
+              <td class="ctrl-result">100,0 %<span class="frac">19/19</span></td>
+              <td class="ctrl-target">Indicatif : 100 % des tâches critiques</td>
+              <td><span class="badge b-info">Info</span></td>
+              <td class="ctrl-action">Affecter au minimum les ressources aux tâches critiques, puis étendre aux tâches de détail pour permettre le lissage de charge et l'analyse capacitaire.</td>
+            </tr>
+            <tr>
+              <td class="ctrl-name">11. Tâches terminées en retard vs baseline</td>
+              <td class="ctrl-result">N/A</td>
+              <td class="ctrl-target">≤ 5 %</td>
+              <td><span class="badge b-na">N/A</span></td>
+              <td class="ctrl-action">Renseigner une baseline pour mesurer les tâches terminées en retard.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============ MONTE CARLO ============ -->
+    <div class="sec-title" id="mc">
+      <h2>Simulation Monte Carlo</h2>
+      <span class="count">5 000 simulations</span>
+      <span class="right"><span class="badge b-warn">Fiabilité limitée</span></span>
+    </div>
+
+    <div class="alert alert-warn">
+      <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span><b>Logique insuffisante pour une simulation fiable</b> — 33,8 % des tâches restantes (26/77) n'ont pas de logique amont ou aval, au-dessus des 5 % attendus (contrôle 1 DCMA-14). Fiabilisez d'abord le réseau : la durée critique simulée ici n'est pas encore fiable.</span>
+    </div>
+
+    <div class="mc-durations" style="margin-top:16px">
+      <div class="dur-card ref">
+        <div class="d-label">Déterministe (CPM)</div>
+        <div class="d-val">1 335,6 <small>j</small></div>
+        <div class="d-delta d-ref">référence, pas un engagement</div>
+      </div>
+      <div class="dur-card">
+        <div class="d-label">P50 — Médiane</div>
+        <div class="d-val">1 378,3 <small>j</small></div>
+        <div class="d-delta d-up">+42,7 j vs CPM</div>
+      </div>
+      <div class="dur-card reco">
+        <div class="d-label">P80 — Objectif planning</div>
+        <div class="d-val" style="color:var(--ok)">1 437,2 <small>j</small></div>
+        <div class="d-delta d-up">+101,6 j vs CPM</div>
+      </div>
+      <div class="dur-card">
+        <div class="d-label">P90 — Prudent</div>
+        <div class="d-val">1 472,9 <small>j</small></div>
+        <div class="d-delta d-up">+137,3 j vs CPM</div>
+      </div>
+    </div>
+
+    <div class="card axis-card">
+      <div class="axis">
+        <div class="axis-fill" style="left:0;width:76%"></div>
+        <div class="marker m-cpm" style="left:2%"><div class="m-val">1 336</div><div class="m-lab">CPM</div></div>
+        <div class="marker" style="left:30%"><div class="m-val">1 378</div><div class="m-lab">P50</div></div>
+        <div class="marker m-p80" style="left:76%"><div class="m-val">1 437</div><div class="m-lab">P80</div></div>
+        <div class="marker" style="left:98%"><div class="m-val">1 473</div><div class="m-lab">P90</div></div>
+      </div>
+      <div class="axis-caption"><span>Durée simulée (jours)</span><span>barème v1 · 5 000 tirages PERT</span></div>
+      <div class="mc-meta">Incertitude P50 → P90 : <b>94,6 j · 6,9 % du P50</b> — incertitude faible (repère : &lt; 25 %)</div>
+    </div>
+
+    <div class="callout">
+      <svg class="c-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+      <span><b>Lecture décisionnelle.</b> Pour un objectif de planning à 80 % de confiance, visez <b>1 437,2 j</b>, soit <b>+101,6 j de contingence</b> par rapport à la durée déterministe (1 335,6 j). Pour un engagement prudent à 90 %, visez <b>1 472,9 j</b> (+137,3 j vs CPM).</span>
+    </div>
+
+    <div class="sec-title"><h2>Indice de criticité par tâche</h2><span class="count">% sur le chemin critique</span></div>
+    <div class="card crit-list">
+      <div class="crit-row"><span class="crit-id">T-0149</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0150</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0154</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0158</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0159</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0160</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0161</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0176</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0180</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-row"><span class="crit-id">T-0181</span><div class="crit-bar"><div class="crit-fill hot" style="width:84.9%"></div></div><span class="crit-val">84,9 %</span></div>
+      <div class="crit-note">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Surveillez en priorité les tâches au-delà de 70 % de criticité.
+      </div>
+    </div>
+
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="container foot-inner">
+    <span><b style="color:var(--text-2)">MPPCR</b> v1.8.0 · MS Project Check &amp; Risk</span>
+    <span class="sep">·</span>
+    <span>Aucun planning conservé après analyse</span>
+    <span class="right">
+      <span class="legend">
+        <span class="li"><span class="lg" style="background:var(--ok)"></span>Conforme</span>
+        <span class="li"><span class="lg" style="background:var(--ko)"></span>À corriger</span>
+        <span class="li"><span class="lg" style="background:var(--warn)"></span>Attention</span>
+      </span>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>

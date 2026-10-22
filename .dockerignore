@@ -23,3 +23,8 @@ Dockerfile
 .dockerignore
 docker-compose*.yml
 .github
+
+# Harnais de test et documentation, inutiles dans l image.
+tests
+docs
+.staging-ancien

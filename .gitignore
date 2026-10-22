@@ -22,3 +22,14 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# Harnais de test : dépendances régénérables
+# (pip install --target tests/.mppcr-deps pyyaml xlsxwriter)
+tests/.mppcr-deps/
+# Planning synthétique de la CI, sans donnée client
+!tests/planning_ci.mpp
+
+# Ancien dossier de staging rapatrié de homelab (doublon de l'historique git)
+.staging-ancien/
+# Documentation tierce sous droits, conservée en local uniquement
+docs/reference/
