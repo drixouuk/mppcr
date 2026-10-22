@@ -69,6 +69,30 @@ RelationType = jpype.JClass("org.mpxj.RelationType")
 # ouvres (voir duration_days).
 PROJECT_CALENDAR = None
 
+# Jours ouvres par semaine du projet (MinutesPerWeek / MinutesPerDay), renseigne
+# a la lecture : il ramene les unites calendaires en jours ouvres. 5 par defaut.
+JOURS_OUVRES_SEMAINE = 5.0
+
+# Unites « ecoulees » (calendaires) de MPXJ, exprimees en jours calendaires.
+# MPXJ les convertit en temps de travail a 24 h par jour : 2 jours calendaires
+# devenaient 6 jours ouvres (48 h / 8 h). On les ramene au prorata de la semaine
+# de travail : 2 jours calendaires = 2 x 5/7 = 1,43 jour ouvre.
+UNITES_ECOULEES = {
+    "ELAPSED_MINUTES": 1 / 1440, "ELAPSED_HOURS": 1 / 24, "ELAPSED_DAYS": 1.0,
+    "ELAPSED_WEEKS": 7.0, "ELAPSED_MONTHS": 30.0, "ELAPSED_YEARS": 365.0,
+}
+# Un decalage en pourcentage n'est pas une duree : c'est une part de la duree du
+# PREDECESSEUR (convention MS Project). Voir lag_days.
+UNITES_POURCENT = {"PERCENT", "ELAPSED_PERCENT"}
+
+
+def nom_unite(d):
+    """Nom de l'unite MPXJ d'une duree (« DAYS », « ELAPSED_DAYS », « PERCENT »...)."""
+    try:
+        return str(d.getUnits().name())
+    except Exception:
+        return ""
+
 
 def duration_days(d):
     """Duree ramenee en jours ouvres.
@@ -86,12 +110,36 @@ def duration_days(d):
         valeur = float(d.getDuration())
     except Exception:
         return 0.0
+    unite = nom_unite(d)
+    if unite in UNITES_ECOULEES:
+        return valeur * UNITES_ECOULEES[unite] * JOURS_OUVRES_SEMAINE / 7.0
+    if unite in UNITES_POURCENT:
+        return 0.0
     if PROJECT_CALENDAR is not None:
         try:
             return float(d.convertUnits(TimeUnit.DAYS, PROJECT_CALENDAR).getDuration())
         except Exception:
             pass
     return valeur
+
+def lag_days(rel):
+    """Decalage d'un lien, en jours ouvres.
+
+    Un decalage en % est la part correspondante de la duree du predecesseur :
+    50 % sur une tache de 10 j = 5 j. Il etait converti comme une duree, ce qui
+    donnait une valeur sans rapport (1,04 j pour « 500 % »)."""
+    lag = rel.getLag()
+    if lag is None:
+        return 0.0
+    if nom_unite(lag) in UNITES_POURCENT:
+        try:
+            part = float(lag.getDuration()) / 100.0
+        except Exception:
+            return 0.0
+        pred = rel.getPredecessorTask()
+        return part * duration_days(pred.getDuration()) if pred is not None else 0.0
+    return duration_days(lag)
+
 
 
 def est_gelee(t):
@@ -280,7 +328,7 @@ def build_graph(proj, opt_factor, pess_factor, estimates):
                 continue
             pred_uid = int(pred_task.getUniqueID())
             if pred_uid in tasks:
-                lag = duration_days(rel.getLag())
+                lag = lag_days(rel)
                 G.add_edge(pred_uid, uid, lag=lag, type=type_lien(rel))
                 n_links += 1
 
@@ -527,6 +575,16 @@ def main():
         PROJECT_CALENDAR = proj.getProjectProperties().getDefaultCalendar()
     except Exception:
         PROJECT_CALENDAR = None
+
+    global JOURS_OUVRES_SEMAINE
+    JOURS_OUVRES_SEMAINE = 5.0
+    try:
+        proprietes = proj.getProjectProperties()
+        jours = float(proprietes.getMinutesPerWeek()) / float(proprietes.getMinutesPerDay())
+        if 0 < jours <= 7:
+            JOURS_OUVRES_SEMAINE = jours
+    except Exception:
+        pass
 
     try:
         estimates = load_estimates_csv(args.estimates) if args.estimates else {}

@@ -1313,6 +1313,23 @@ else:
 
 
 # --------------------------------------------------------------------------
+section("v1.15 : formats de décalage et unités calendaires")
+
+if (STAGE / "test_lags.xml").exists():
+    _lags = app.parse_montecarlo_output(app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "montecarlo.py"), "test_lags.xml", "--sims", "50"],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=300).stdout or ""))
+    _cpm_lags = next((m["value_num"] for m in _lags["metrics"] if m["key"] == "deterministic"), None)
+    check("décalage en % = part de la durée du prédécesseur (A 10 j + 50 % + B 4 j = 19 j)",
+          _cpm_lags == 19.0, f"={_cpm_lags}")
+    _sonde = subprocess.run([sys.executable, str(STAGE / "sonde_lags.py"), "test_lags.xml"],
+                            cwd=str(STAGE), capture_output=True, text=True, timeout=300).stdout
+    check("2 jours calendaires = 1,43 jour ouvré (et non 6)", "lag_days=1.429" in _sonde, _sonde[-200:])
+else:
+    check("fixture test_lags.xml présente", False, "absente")
+
+
+# --------------------------------------------------------------------------
 section("Non-régression : sortie par défaut de dcma14.py et montecarlo.py")
 import hashlib  # noqa: E402
 check("dcma14.py : sortie par défaut inchangée malgré l'option --details",

@@ -6,6 +6,10 @@
 #   ./lancer_lxc.sh                                  # copie seulement
 #   ./lancer_lxc.sh "python3 make_preview.py"         # aperçus HTML
 #   ./lancer_lxc.sh "python3 check_mppcr.py"          # harnais complet
+#   ./lancer_lxc.sh "python3 alignment_check.py templates mppcr-redesign.html"
+#
+# Tous les scripts et fichiers de test de tests/ (*.py, *.xml, *.txt, *.mpp) et
+# la maquette v2 sont envoyés à la racine de /tmp/harness, à côté du code.
 #   ./lancer_lxc.sh "sh -c 'cat /tmp/mppcr-preview/les-deux.html'" | head
 set -euo pipefail
 
@@ -23,9 +27,8 @@ tar czf "$ARCHIVE" \
     -C "$STAGE" app.py dcma14.py montecarlo.py VERSION templates Dockerfile \
                 requirements.txt docker-compose.yml docker-compose.prod.yml \
                 .gitignore .github README.md CHANGELOG.md \
-    -C "$CHECK" check_mppcr.py alignment_check.py make_preview.py \
-                test_projet.xml test_liens.xml ref_dcma.txt ref_mc.txt gen_base.py mesure_options.py \
-                temoin_recap.py lots_temoin.py debug_macro.py \
+    -C "$STAGE/docs/maquettes" mppcr-redesign.html \
+    -C "$CHECK" $(cd "$CHECK" && ls -- *.py *.xml *.txt *.mpp 2>/dev/null) \
     -C "$(dirname "$DEPS")" "$(basename "$DEPS")"
 
 scp "${SSHOPT[@]}" "$ARCHIVE" "$HOST:/tmp/mppcr-harness.tgz"
