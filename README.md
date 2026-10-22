@@ -17,11 +17,18 @@ Deux outils :
 - **Score de conformité** — une note sur 100 (barème MPPCR versionné) qui
   synthétise les contrôles en tenant compte des données manquantes, plutôt qu'un
   décompte brut de verdicts.
-- **Exports** — résultat CSV ou Excel demandés en plus de l'affichage, ou PDF
-  via l'impression du navigateur.
+- **Fin prévisionnelle** — reste à faire simulé depuis la date d'état et dates de
+  fin P50 / P80 / P90 sur le calendrier du projet, sensibilité des tâches
+  (« tornado »), histogramme et courbe en S de la durée simulée.
+- **Comparaison de versions** — même analyse sur la version précédente du
+  planning : évolution du score, des contrôles, des percentiles, des dates et de
+  la criticité.
+- **Exports** — CSV, Excel et **rapport PDF** (une page de synthèse puis les
+  annexes), demandés en plus de l'affichage.
 
-Le projet est défini comme son propre PID (pas de portefeuille multi-projets),
-en français, sans authentification (voir [Sécurité](#sécurité--avertissement)).
+Le projet est défini comme son propre PID (pas de portefeuille multi-projets), en
+français. Une authentification HTTP Basic facultative est intégrée (`AUTH_USERS`,
+voir [Sécurité](#sécurité--avertissement)).
 
 ## Interface
 
@@ -111,6 +118,7 @@ location / {
 | `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo : 5 Mo dans l'image et dans `docker-compose.prod.yml`, 20 Mo dans `docker-compose.yml` (build local). Au-delà, refus avec un message explicite. |
 | `JAVA_TOOL_OPTIONS` | `-Xmx1536m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
 | `APP_TIMEZONE` | `Europe/Paris` | Fuseau du « jour » : le quota se réinitialise à minuit dans ce fuseau, et les exports sont datés du même jour (le conteneur tourne en UTC). |
+| `AUTH_USERS` | *(vide)* | Comptes autorisés `nom:empreinte` (empreintes Werkzeug), séparés par des virgules : HTTP Basic sur toutes les pages sauf `/healthz`. Vide : pas d'authentification. |
 | `TRUSTED_PROXIES` | *(vide)* | Adresses du ou des reverse proxies, séparées par des virgules (ex. `192.168.1.141`). Renseignée, l'IP du visiteur n'est lue dans `X-Forwarded-For` que pour les requêtes venant de ces adresses : un accès direct au port 5000 ne peut plus se fabriquer une nouvelle IP à chaque requête pour contourner le quota. Vide : en-tête accepté de tous (comportement historique, à réserver à un port joignable par le seul proxy). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
@@ -253,16 +261,14 @@ Deux garde-fous : sans aucun lien exploitable, la simulation s'arrête avec un
 message explicite plutôt que de traiter chaque tâche comme indépendante ; et un
 réseau contenant une boucle de dépendances est refusé.
 
-**Coût mesuré.** `run_simulation()` est en Python pur : le temps croît comme
-`simulations × tâches`. Mesures sur un plan de 24 000 tâches (20 571 liens) :
-100 simulations en 18,6 s, 300 en 43,8 s, soit **0,126 s par simulation** plus
-environ 6 s fixes (démarrage JVM, lecture, construction du graphe) — donc
-**≈ 636 s pour les 5 000 simulations du formulaire**, au-delà du
-`ANALYSIS_TIMEOUT` de 300 s. Le pic mémoire reste modeste (280 Mo) : la limite est
-de **temps**, pas de mémoire. Ordres de grandeur : ~500 tâches → 15-20 s ;
-~10 000 tâches → ~4,5 min ; au-delà, l'analyse est coupée par le délai maximal.
-La vectorisation numpy (traitement par niveaux topologiques) est identifiée comme
-la parade si des plannings de cette taille deviennent courants.
+**Coût mesuré.** Depuis la v1.15.0, les tirages sont traités **par blocs
+vectorisés** (numpy, matrices tâches × tirages bornées à 4 millions d'éléments).
+Sur un réseau synthétique de 24 000 tâches : **0,007 s par tirage** au lieu de
+0,126 s pour l'ancienne boucle tirage par tirage, soit environ 36 s pour 5 000
+tirages au lieu de 636 s (au-delà du délai de 300 s) ; sur 300 tâches, × 27. Sans
+aléa, les deux moteurs donnent exactement les mêmes dates et la même criticité ;
+avec aléa, les percentiles concordent à 0,2 % près (l'ordre des tirages change,
+d'où la régénération de `ref_mc.txt`).
 
 **Fiabilité affichée.** Quand le diagnostic DCMA-14 accompagne la simulation dans
 la même analyse, l'avertissement de fiabilité reprend la **valeur réelle du
@@ -280,24 +286,29 @@ mesures sont justes, mais elles ne comparent pas la même chose. Le ratio reste
 affiché comme information de forme du réseau, sous l'étiquette « liens par tâche,
 tous statuts confondus ».
 
-### Évolutions envisagées (non implémentées)
+### Fin prévisionnelle, sensibilité, distribution, corrélation
 
-1. **Reste-à-faire et fin prévisionnelle par lot** : la répartition par lot est
-   livrée (voir [Répartition par macro-tâche](#répartition-par-macro-tâche-monte-carlo)),
-   mais elle exprime encore des **durées**, pas des dates : ni le reste-à-faire ni
-   la fin prévisionnelle ne sont calculés par lot. Les briques existent
-   (`ProjectCalendar.getDate()` pour convertir des jours ouvrés en date réelle, en
-   sautant week-ends et jours fériés) ; c'est la même question de fond que le point
-   suivant.
-2. **Bascule en « durée restante / fin prévisionnelle »** : aujourd'hui la
-   simulation affiche la durée **totale depuis le jour 0**, passé compris, et
-   n'utilise ni la date d'état ni `Task.getRemainingDuration()`. Pour un planning
-   en cours, on attend plutôt le **reste-à-faire** et une **date de fin
-   prévisionnelle** ancrée sur la date d'état. C'est un changement de
-   signification, pas un correctif, et il repose sur un CPM du travail restant
-   **simplifié** : toute tâche simulée est supposée pouvoir démarrer à la date
-   d'état (les dates réelles déjà passées ne sont pas rejouées, et il n'y a pas de
-   nivellement des ressources).
+Options de `montecarlo.py`, toujours demandées par l'application (la corrélation
+selon le formulaire) ; sans elles, la sortie par défaut du script est inchangée.
+
+| Option | Restitution |
+| --- | --- |
+| `--prevision` | **Reste à faire** depuis la date d'état (tâche achevée : 0 j et liens aval retirés ; tâche commencée : durée restante, avec son incertitude), P50 / P80 / P90 du reste à faire et **dates de fin** sur le calendrier du projet (`ProjectCalendar.getDate`, week-ends et fériés sautés). Simplification assumée : toute tâche peut démarrer dès la date d'état, les dates réelles passées ne sont pas rejouées, pas de nivellement. Sans date d'état : message explicite. |
+| `--sensibilite` | **Tornado** : corrélation de Pearson entre la durée tirée de chaque tâche et la fin du projet, top 10. Une tâche toujours critique mais courte et peu incertaine pèse peu ; c'est là qu'une estimation affinée rapporte le plus. |
+| `--histogramme N` | **Distribution** de la durée simulée en N classes (20 dans l'application) : histogramme avec repères P50 / P80 / P90 et **courbe en S** (part cumulée), deux graphiques SVG rendus côté serveur, table des valeurs dépliable. |
+| `--correlation R` | **Corrélation intra-lot** (0 à 0,9 ; formulaire : aucune, 0,3, 0,6) : les durées des tâches d'un même lot de niveau 1 sont corrélées par leurs rangs (Iman-Conover), les lois de chaque tâche restant exactement conservées. Des tâches indépendantes se compensent et sous-estiment le risque : sur un réseau de test, l'écart P90 − P50 passe de 5,7 j à 8,9 j avec R = 0,6. |
+
+### Comparaison de deux versions
+
+Le champ facultatif « Comparer avec une version précédente » relance **la même
+analyse, avec les mêmes options**, sur l'ancien fichier, et ajoute en tête de page :
+évolution du score, des 14 contrôles (amélioré / dégradé / stable, tâches
+**nouvelles en écart** et **résolues**), des percentiles, des dates de fin
+prévisionnelles et de la criticité. Les tâches sont rapprochées par leur numéro
+MS Project : la liste suppose une numérotation stable entre les versions. Une
+comparaison compte pour **deux analyses** du quota (refusée s'il n'en reste
+qu'une) ; un échec sur l'ancienne version n'empêche pas d'afficher l'analyse
+principale.
 
 ## Score de conformité
 
@@ -359,7 +370,8 @@ dans l'en-tête de la page de résultat. Un export non demandé y reste visible
 | Export | Contenu |
 | --- | --- |
 | **CSV** | séparateur `;`, BOM UTF-8 (Excel FR) : score, synthèse, contrôles, priorités, Monte Carlo, criticité, répartition par lot si demandée, sorties brutes |
-| **Excel** | une feuille par analyse lancée (« Contrôles DCMA-14 », « Monte Carlo »), verdicts colorés, score en tête |
+| **Excel** | une feuille par analyse lancée (« Contrôles DCMA-14 », « Monte Carlo ») et une feuille « Comparaison » le cas échéant, verdicts colorés, score en tête |
+| **Rapport PDF** | page de synthèse (score, priorités, risque, dates de fin, évolution) à joindre à un comité, puis annexes : 14 contrôles, tâches concernées, criticité, sensibilité, histogramme, comparaison. ReportLab, police Helvetica |
 
 **Injection de formules.** Les noms de tâches et de lots viennent du planning
 envoyé : un nom commençant par `=`, `+`, `-` ou `@` aurait été lu comme une
@@ -374,8 +386,7 @@ supplémentaire, aucun JavaScript, et un simple clic suffit à télécharger. Un
 lancement peut demander les deux exports : il ne décompte qu'**une** analyse du
 quota.
 
-Pour un PDF, utiliser le style d'impression déjà embarqué : **Imprimer →
-Enregistrer au format PDF** depuis la page de résultat.
+Le bouton **Imprimer / PDF** reste disponible pour une copie fidèle de la page.
 
 ## Attente et arrêt d'une analyse
 
@@ -527,20 +538,25 @@ d'usage par IP (nombre d'analyses par jour), sans lien avec le contenu analysé.
 
 ## Sécurité — avertissement
 
-> **L'application n'a aucune authentification intégrée.**
+> **Sans `AUTH_USERS`, l'application n'exige aucune authentification.**
 >
-> Toute personne pouvant joindre l'application peut soumettre un planning et
-> consommer du CPU. **Ne jamais l'exposer directement sur Internet.** En amont,
-> mettre en place au minimum une authentification basique au niveau du reverse
-> proxy, un accès VPN, ou une restriction réseau (liste d'IP autorisées) —
-> WebAuthn, NPMplus Access List ou équivalent.
+> Toute personne pouvant joindre l'application peut alors soumettre un planning
+> et consommer du CPU. **Ne jamais l'exposer ainsi sur Internet.** Renseigner
+> `AUTH_USERS` (HTTP Basic, derrière HTTPS uniquement), et/ou placer en amont un
+> contrôle d'accès plus fort : Cloudflare Access, VPN, liste d'IP autorisées
+> (NPMplus Access List).
+>
+> `AUTH_USERS` : comptes `nom:empreinte` séparés par des virgules ; l'empreinte se
+> calcule par `python3 -c "from werkzeug.security import generate_password_hash
+> as g; print(g('mot de passe'))"`. Toutes les pages sont protégées sauf
+> `/healthz`.
 >
 > La limitation d'usage (`DAILY_ANALYSIS_LIMIT`) est un garde-fou anti-abus
 > simple, pas une protection : elle est contournable par changement d'adresse IP
 > et n'authentifie personne.
 >
-> Le contrôle d'accès par comptes utilisateurs est volontairement hors périmètre
-> de cette version.
+> Les comptes `AUTH_USERS` partagent le quota de leur adresse IP : il n'y a pas de
+> quota par compte.
 
 Chaque réponse porte des **en-têtes de sécurité** : `Content-Security-Policy`
 (aucune ressource externe, scripts limités aux deux scripts de l'application par
@@ -559,7 +575,8 @@ app.py            Interface Flask : parsing des sorties des scripts, cibles DCMA
                   commentaires, KPI Monte Carlo, priorités d'action, quota d'usage.
 dcma14.py         Contrôle qualité DCMA-14 (appelé en subprocess, option --details
                   pour la liste des N° de tâches en écart).
-montecarlo.py     Simulation Monte Carlo (script CLI d'origine, appelé en subprocess).
+montecarlo.py     Simulation Monte Carlo (moteur vectorisé, appelé en subprocess).
+rapport_pdf.py    Rapport PDF (ReportLab) construit à partir des sorties analysées.
 templates/        Interface web server-rendue (Jinja2), CSS sans framework, sans JS requis.
 Dockerfile        python:3.11-slim + JRE headless (MPXJ/jpype1) + Gunicorn (2 workers gthread × 4 threads).
 ```
@@ -638,7 +655,7 @@ Trois vérifications, à lancer avant toute publication :
 
 | Vérification | Portée | Volume |
 | --- | --- | --- |
-| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports (injection de formules), proxies de confiance, en-têtes, mémoire, répartition par lot, types de liens, CPLI et contraintes sur `test_liens.xml`, non-régression des sorties de référence | 344 |
+| `check_mppcr.py` | parsing des sorties, rendu des écrans, quota et concurrence, exports (injection de formules, PDF), proxies de confiance, authentification, en-têtes, mémoire, répartition par lot, types de liens et formats de décalage, contrôles 5, 8, 10, 11 et 13 sur plannings dédiés, prévision, sensibilité, distribution, corrélation, comparaison, non-régression des sorties de référence | 380 |
 | `alignment_check.py` | feuille de style de la maquette reprise **verbatim**, jetons, classes, structure des écrans | 190 |
 | `verify_prod.sh` | production réelle : conteneur, HTTP, répartition par lot, exports, refus, charge, absence de résidu | 62 |
 
@@ -646,6 +663,13 @@ Les deux premières tournent **dans l'image de production** (seul environnement 
 embarque Flask, JPype, MPXJ et Java) : `tests/lancer_lxc.sh` y copie le code du dépôt
 et le harnais (`tests/`), puis exécute la commande demandée. `verify_prod.sh` interroge le
 conteneur en fonctionnement sur `http://127.0.0.1:5000`.
+
+Plannings de test (`tests/*.xml`) : `test_projet.xml` (référence), `test_liens.xml`
+(liens SS/FF, SNLT, CPLI), `test_lags.xml` (décalages en %, jours calendaires),
+`test_dcma_ecarts.xml` (contrôles 8, 10, 11). Les dépendances du harnais
+(`tests/.mppcr-deps`, non versionné) se régénèrent par
+`pip install --target tests/.mppcr-deps --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 --python-version 3.11 --only-binary=:all: pyyaml xlsxwriter reportlab==5.0.1 pillow==12.3.0 charset-normalizer==3.5.2`.
+Les scripts d'enquête ponctuels sont rangés dans `tests/enquetes/` (voir son README).
 
 Les sorties de `dcma14.py` et `montecarlo.py` sont comparées **pour de vrai** aux
 références figées (`ref_dcma.txt`, `ref_mc.txt`) : elles ne sont régénérées que

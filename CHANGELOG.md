@@ -5,6 +5,28 @@ Les versions antérieures à la v1.6.0 sont documentées dans les
 
 ## v1.15.0 (en cours)
 
+### Ajouté
+- **Fin prévisionnelle** depuis la date d'état : reste à faire simulé, dates de fin
+  P50 / P80 / P90 sur le calendrier du projet (`--prevision`).
+- **Sensibilité** (tornado) des tâches sur la date de fin (`--sensibilite`).
+- **Histogramme et courbe en S** de la durée simulée (`--histogramme`), en SVG
+  rendu côté serveur avec info-bulles natives et table des valeurs.
+- **Corrélation intra-lot** des durées (Iman-Conover, `--correlation`), au choix
+  dans le formulaire : aucune, 0,3, 0,6.
+- **Comparaison avec une version précédente** du planning (score, contrôles,
+  tâches nouvelles en écart et résolues, percentiles, dates, criticité ; compte
+  pour deux analyses).
+- **Rapport PDF** : synthèse d'une page et annexes (ReportLab 5.0.1).
+- **Authentification facultative** HTTP Basic (`AUTH_USERS`, empreintes
+  Werkzeug), `/healthz` restant public.
+
+### Modifié
+- **Moteur Monte Carlo vectorisé** (blocs numpy) : 0,007 s par tirage sur 24 000
+  tâches au lieu de 0,126 s ; résultats identiques sans aléa, percentiles à 0,2 %
+  près avec aléa (`ref_mc.txt` régénérée : P80 51,0 -> 51,2 j, P90 52,3 -> 52,6 j).
+- Scripts d'enquête ponctuels rangés dans `tests/enquetes/` ; `lancer_lxc.sh`
+  envoie tout le dossier `tests/`.
+
 ### Corrigé
 - **Décalages en %** : convertis comme une durée (« 500 % » donnait 1,04 j) ; ils
   valent désormais la part correspondante de la durée du prédécesseur.

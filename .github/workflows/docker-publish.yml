@@ -246,6 +246,27 @@ jobs:
           print(f"XLSX OK ({len(classeur)} octets)")
           PY
 
+          echo "--- v1.15 : rapport PDF, prévision, distribution, sensibilité ---"
+          curl -fsS -o /tmp/result-pdf.html \
+            -F "analysis=both" -F "export=pdf" -F "sims=500" -F "correlation=0.3" \
+            -F "mpp_file=@/tmp/planning.mpp;filename=planning.mpp" \
+            http://127.0.0.1:5000/analyse
+          grep -q 'Fin prévisionnelle' /tmp/result-pdf.html
+          grep -q 'Distribution des durées simulées' /tmp/result-pdf.html
+          grep -q 'Sensibilité des tâches' /tmp/result-pdf.html
+          grep -q 'class="chart-bar"' /tmp/result-pdf.html
+          python3 - <<'PY'
+          import base64, re, sys
+          html = open("/tmp/result-pdf.html", encoding="utf-8").read()
+          lien = re.search(r'href="data:application/pdf;base64,([^"]+)"', html)
+          if not lien:
+              sys.exit("lien PDF absent de la page")
+          pdf = base64.b64decode(lien.group(1))
+          if not pdf.startswith(b"%PDF-"):
+              sys.exit("rapport PDF invalide")
+          print(f"PDF OK ({len(pdf)} octets)")
+          PY
+
           echo "--- arrêt d'analyse ---"
           jeton=$(python3 -c "import secrets; print(secrets.token_hex(16))")
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:5000/annuler/$jeton")
