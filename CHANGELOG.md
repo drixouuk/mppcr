@@ -3,7 +3,7 @@
 Les versions antérieures à la v1.6.0 sont documentées dans les
 [releases GitHub](https://github.com/drixouuk/mppcr/releases).
 
-## v1.14.0 — branche `dev/montecarlo-macro` (non publiée)
+## v1.14.0
 
 ### Corrigé — audit du 22/10/2026
 - **Injection de formules dans les exports** : un nom de tâche ou de lot
