@@ -130,7 +130,7 @@ TIMEOUT_SECONDS = int(os.environ.get("ANALYSIS_TIMEOUT", "900"))
 # Un créneau plus ancien que cette durée ne peut appartenir qu'à un worker tué :
 # le purger plus tôt laissait démarrer de nouvelles JVM pendant qu'une analyse
 # « les deux » tournait encore, au-delà de MAX_CONCURRENT_ANALYSES.
-SCRIPTS_PER_REQUEST = 2
+SCRIPTS_PER_REQUEST = 4  # deux scripts, et deux de plus pour une comparaison
 
 
 def slot_stale_seconds():
@@ -1861,7 +1861,116 @@ def export_basename(filename):
     return f"MPPCR_{stem}_{aujourdhui().isoformat()}"
 
 
-def build_downloads(exports, results, filename):
+# --- Comparaison de deux versions d'un planning ---------------------------------
+# Contrôles où une valeur plus HAUTE est meilleure (part de liens FS, CPLI, BEI) ;
+# pour tous les autres, moins d'écarts vaut mieux.
+DCMA_PLUS_HAUT_MEILLEUR = {4, 13, 14}
+RANG_VERDICT = {"ko": 0, "na": 1, "info": 1, "ok": 2}
+
+
+def _evolution(num, avant, apres):
+    """« Amélioré », « Dégradé » ou « Stable » pour une ligne de contrôle."""
+    if avant is None:
+        return "Nouveau"
+    ra, rn = RANG_VERDICT.get(avant["kind"], 1), RANG_VERDICT.get(apres["kind"], 1)
+    if rn != ra:
+        return "Amélioré" if rn > ra else "Dégradé"
+    va, vn = avant.get("value_num"), apres.get("value_num")
+    if va is None or vn is None or abs(vn - va) < 1e-9:
+        return "Stable"
+    meilleur = vn > va if num in DCMA_PLUS_HAUT_MEILLEUR else vn < va
+    return "Amélioré" if meilleur else "Dégradé"
+
+
+def comparer(avant, apres, fichier_avant):
+    """Évolution entre la version précédente (`avant`) et l'actuelle (`apres`).
+
+    Les numéros de tâches sont ceux de MS Project : les listes « nouvelles en
+    écart » et « résolues » supposent une numérotation stable entre les versions.
+    """
+    resultat = {"fichier_avant": fichier_avant, "controles": [], "mc": [], "prevision": [],
+                "criticite": [], "score": None, "bilan": {"Amélioré": 0, "Dégradé": 0}}
+    da, dn = parsed_by_kind(avant, "dcma"), parsed_by_kind(apres, "dcma")
+    if da and dn:
+        sa, sn = (da.get("score") or {}).get("score"), (dn.get("score") or {}).get("score")
+        resultat["score"] = {"avant": sa, "apres": sn,
+                             "delta": (sn - sa) if sa is not None and sn is not None else None}
+        par_num = {r["num"]: r for r in da["rows"]}
+        for r in dn["rows"]:
+            a = par_num.get(r["num"])
+            evolution = _evolution(r["num"], a, r)
+            if evolution in resultat["bilan"]:
+                resultat["bilan"][evolution] += 1
+            ids_a = set((da.get("task_details") or {}).get(r["num"]) or [])
+            ids_n = set((dn.get("task_details") or {}).get(r["num"]) or [])
+            resultat["controles"].append({
+                "num": r["num"], "nom": DCMA_LABELS.get(r["num"], r["name"]),
+                "avant": a["value"] if a else "—", "apres": r["value"],
+                "verdict_avant": VERDICT_LABELS.get(a["kind"]) if a else "—",
+                "verdict_apres": VERDICT_LABELS.get(r["kind"]),
+                "evolution": evolution,
+                "css": {"Amélioré": "b-ok", "Dégradé": "b-ko"}.get(evolution, "b-na"),
+                "nouvelles": sorted(ids_n - ids_a), "resolues": sorted(ids_a - ids_n),
+            })
+    ma, mn = parsed_by_kind(avant, "montecarlo"), parsed_by_kind(apres, "montecarlo")
+    if ma and mn and not ma.get("stop_message") and not mn.get("stop_message"):
+        va = {m["key"]: m.get("value_num") for m in ma.get("metrics") or []}
+        vn = {m["key"]: m.get("value_num") for m in mn.get("metrics") or []}
+        for cle in ("deterministic", "p50", "p80", "p90"):
+            if va.get(cle) is not None and vn.get(cle) is not None:
+                resultat["mc"].append({"cle": cle, "libelle": MC_LABELS[cle], "avant": va[cle],
+                                       "apres": vn[cle], "delta": vn[cle] - va[cle]})
+        pa = {r["key"]: r for r in ((ma.get("forecast") or {}).get("rows") or [])}
+        for r in ((mn.get("forecast") or {}).get("rows") or []):
+            if r["key"] in pa:
+                ecart = (datetime.fromisoformat(r["date"]) - datetime.fromisoformat(pa[r["key"]]["date"])).days
+                resultat["prevision"].append({
+                    "cle": r["key"], "avant": pa[r["key"]]["date_fr"], "apres": r["date_fr"],
+                    "ecart_jours": ecart})
+        ca = {c["name"]: c["pct_num"] for c in ma.get("criticality") or []}
+        cn = {c["name"]: c["pct_num"] for c in mn.get("criticality") or []}
+        lignes = [{"nom": nom, "avant": ca.get(nom), "apres": cn.get(nom),
+                   "delta": (cn.get(nom) or 0.0) - (ca.get(nom) or 0.0)}
+                  for nom in set(ca) | set(cn)]
+        resultat["criticite"] = sorted(lignes, key=lambda l: -abs(l["delta"]))[:10]
+    return resultat
+
+
+def comparaison_export(comparaison):
+    """Sections d'export de la comparaison -> [(titre, colonnes, lignes)]."""
+    if not comparaison:
+        return []
+    sections = []
+    titre = f"Comparaison avec {comparaison['fichier_avant']}"
+    if comparaison.get("score"):
+        s = comparaison["score"]
+        sections.append((titre + " — score", ["Score avant", "Score actuel", "Évolution"],
+                         [[s["avant"], s["apres"], s["delta"]]]))
+    if comparaison.get("controles"):
+        sections.append((titre + " — contrôles DCMA-14",
+                         ["N°", "Contrôle", "Avant", "Actuel", "Évolution",
+                          "Nouvelles tâches en écart", "Tâches résolues"],
+                         [[c["num"], c["nom"], c["avant"], c["apres"], c["evolution"],
+                           ", ".join(map(str, c["nouvelles"])), ", ".join(map(str, c["resolues"]))]
+                          for c in comparaison["controles"]]))
+    if comparaison.get("mc"):
+        sections.append((titre + " — Monte Carlo", ["Indicateur", "Avant (j)", "Actuel (j)", "Écart (j)"],
+                         [[m["libelle"], m["avant"], m["apres"], round(m["delta"], 1)]
+                          for m in comparaison["mc"]]))
+    if comparaison.get("prevision"):
+        sections.append((titre + " — fin prévisionnelle",
+                         ["Indicateur", "Avant", "Actuelle", "Glissement (jours calendaires)"],
+                         [[r["cle"].upper() if r["cle"] != "plan" else "Planifié", r["avant"],
+                           r["apres"], r["ecart_jours"]] for r in comparaison["prevision"]]))
+    if comparaison.get("criticite"):
+        sections.append((titre + " — criticité", ["Tâche", "Avant (%)", "Actuelle (%)", "Écart (points)"],
+                         [[l["nom"], l["avant"] if l["avant"] is not None else "",
+                           l["apres"] if l["apres"] is not None else "", round(l["delta"], 1)]
+                          for l in comparaison["criticite"]]))
+    return sections
+
+
+def build_downloads(exports, results, filename, comparaison=None):
     """Liens de téléchargement autonomes pour les exports demandés.
 
     Le fichier est encodé dans la page elle-même (« data: ») : aucun stockage
@@ -1875,9 +1984,9 @@ def build_downloads(exports, results, filename):
     downloads = []
     for fmt in exports:
         if fmt == "csv":
-            payload = csv_export_payload(results, filename)
+            payload = csv_export_payload(results, filename, comparaison)
         elif fmt == "xlsx":
-            payload = xlsx_export_payload(results, filename)
+            payload = xlsx_export_payload(results, filename, comparaison)
         else:
             continue
         libelle, mimetype, extension = EXPORT_FORMATS[fmt]
@@ -2050,7 +2159,7 @@ class CsvSansFormule:
             self.writerow(row)
 
 
-def csv_export_payload(results, filename):
+def csv_export_payload(results, filename, comparaison=None):
     """CSV séparé par des points-virgules, avec BOM UTF-8 (Excel FR).
 
     Un seul fichier ne porte pas d'onglets : les sections sont introduites par
@@ -2164,6 +2273,12 @@ def csv_export_payload(results, filename):
             if montecarlo.get("macro_message"):
                 writer.writerow(["Répartition indisponible", montecarlo["macro_message"]])
 
+    for titre, colonnes, lignes in comparaison_export(comparaison):
+        writer.writerow([])
+        writer.writerow([f"# {titre.upper()}"])
+        writer.writerow(colonnes)
+        writer.writerows(lignes)
+
     if dcma and dcma.get("summary"):
         writer.writerow([])
         writer.writerow(["# RÉSUMÉ DU SCRIPT DCMA-14"])
@@ -2181,7 +2296,7 @@ def csv_export_payload(results, filename):
     return ("\ufeff" + buffer.getvalue()).encode("utf-8")
 
 
-def xlsx_export_payload(results, filename):
+def xlsx_export_payload(results, filename, comparaison=None):
     """Classeur Excel : une feuille par analyse lancée."""
     dcma = parsed_by_kind(results, "dcma")
     montecarlo = parsed_by_kind(results, "montecarlo")
@@ -2395,6 +2510,24 @@ def xlsx_export_payload(results, filename):
                 sheet.write(row, 1, montecarlo["macro_message"], texte)
                 row += 1
 
+    sections = comparaison_export(comparaison)
+    if sections:
+        sheet = workbook.add_worksheet("Comparaison")
+        sheet.set_column("A:A", 42)
+        sheet.set_column("B:G", 18)
+        row = 0
+        for titre_section, colonnes, lignes in sections:
+            sheet.write(row, 0, titre_section, titre)
+            row += 1
+            for column, label in enumerate(colonnes):
+                sheet.write(row, column, label, entete)
+            row += 1
+            for ligne in lignes:
+                for column, valeur in enumerate(ligne):
+                    sheet.write(row, column, valeur)
+                row += 1
+            row += 1
+
     workbook.close()
     return output.getvalue()
 
@@ -2514,6 +2647,23 @@ def analyse():
     if not mpp_file.filename.lower().endswith(".mpp"):
         return render_template("error.html", message="Seuls les fichiers .mpp sont acceptés."), 400
 
+    prev_file = request.files.get("mpp_file_prev")
+    if prev_file is not None and not prev_file.filename:
+        prev_file = None
+    if prev_file is not None:
+        if not prev_file.filename.lower().endswith(".mpp"):
+            return render_template(
+                "error.html", message="La version précédente doit aussi être un fichier .mpp."), 400
+        restantes = quota_remaining(ip)
+        if restantes is not None and restantes < 2:
+            return render_template(
+                "error.html",
+                title="Quota insuffisant pour comparer",
+                variant="warn",
+                message="Une comparaison compte pour deux analyses, et il vous en reste "
+                        f"{restantes} aujourd'hui. Relancez sans version précédente, ou demain.",
+            ), 429
+
     include_montecarlo = analysis in {"montecarlo", "both"}
     sims = opt = pess = macro_level = None
     correlation = 0.0
@@ -2550,6 +2700,14 @@ def analyse():
             if mpp_path.stat().st_size == 0:
                 return render_template("error.html", message="Le fichier planning est vide."), 400
 
+            prev_path = None
+            if prev_file is not None:
+                prev_path = tmp_path / "precedent.mpp"
+                prev_file.save(str(prev_path))
+                if prev_path.stat().st_size == 0:
+                    return render_template(
+                        "error.html", message="Le fichier de la version précédente est vide."), 400
+
             estimates_path = None
             estimates_file = request.files.get("estimates_file")
 
@@ -2569,71 +2727,99 @@ def analyse():
                         message="Le fichier CSV d'estimations est vide.",
                     ), 400
 
-            results = []
+            def executer(chemin, compter):
+                """Diagnostic et/ou simulation demandés, sur le planning `chemin`.
+                `compter` est appelé après chaque script réussi (quota)."""
+                resultats = []
+                if analysis in {"dcma", "both"}:
+                    # --details ajoute le bloc « numéros de tâches en écart », qui
+                    # alimente la colonne « Tâches (N°) » du tableau.
+                    stdout = run_script(
+                        [sys.executable, str(DCMA_SCRIPT), str(chemin), "--details"],
+                        "le diagnostic DCMA-14",
+                        token=client_token,
+                    )
+                    # Lignes de diagnostic technique produites par dcma14.py : elles ne
+                    # contiennent que des nombres (numéros de tâche et compteurs de
+                    # liens), et servent à distinguer un planning sans liens d'un
+                    # planning dont la lecture des liens échoue. Journalisées pour
+                    # pouvoir être relues sans exposer le contenu du planning.
+                    for ligne in stdout.splitlines():
+                        if ligne.startswith("DIAG|"):
+                            app.logger.info("diagnostic de lecture : %s", ligne.strip()[:400])
+                    compter()
+                    resultats.append(
+                        {
+                            "kind": "dcma",
+                            "title": "Diagnostic qualité DCMA-14",
+                            "parsed": parse_dcma_output(stdout),
+                        }
+                    )
 
-            if analysis in {"dcma", "both"}:
-                # --details ajoute le bloc « numéros de tâches en écart », qui
-                # alimente la colonne « Tâches (N°) » du tableau.
-                stdout = run_script(
-                    [sys.executable, str(DCMA_SCRIPT), str(mpp_path), "--details"],
-                    "le diagnostic DCMA-14",
-                    token=client_token,
-                )
-                # Lignes de diagnostic technique produites par dcma14.py : elles ne
-                # contiennent que des nombres (numéros de tâche et compteurs de
-                # liens), et servent à distinguer un planning sans liens d'un
-                # planning dont la lecture des liens échoue. Journalisées pour
-                # pouvoir être relues sans exposer le contenu du planning.
-                for ligne in stdout.splitlines():
-                    if ligne.startswith("DIAG|"):
-                        app.logger.info("diagnostic de lecture : %s", ligne.strip()[:400])
+                if include_montecarlo:
+                    cmd = [
+                        sys.executable,
+                        str(MONTECARLO_SCRIPT),
+                        str(chemin),
+                        "--sims",
+                        str(sims),
+                        "--opt",
+                        str(opt),
+                        "--pess",
+                        str(pess),
+                    ]
+
+                    if estimates_path is not None:
+                        cmd.extend(["--estimates", str(estimates_path)])
+
+                    # Répartition facultative par lot WBS (niveau 1 à 3) : le moteur
+                    # simule toujours au niveau détail, seule la restitution change.
+                    if macro_level is not None:
+                        cmd.extend(["--macro-level", str(macro_level)])
+
+                    # Sensibilité (tornado), distribution (histogramme et courbe en S)
+                    # et prévision depuis la date d'état : toujours demandées, le
+                    # moteur vectorisé les rend peu coûteuses.
+                    cmd.extend(["--sensibilite", "--histogramme", str(CLASSES_HISTOGRAMME),
+                                "--prevision"])
+                    if correlation:
+                        cmd.extend(["--correlation", str(correlation)])
+
+                    stdout = run_script(cmd, "la simulation Monte Carlo", token=client_token)
+                    compter()
+                    resultats.append(
+                        {
+                            "kind": "montecarlo",
+                            "title": "Simulation Monte Carlo",
+                            "parsed": parse_montecarlo_output(stdout, macro_level),
+                        }
+                    )
+
+                return resultats
+
+            def compter_principale():
+                nonlocal quota_counted
                 quota_counted = count_analysis(ip, quota_counted)
-                results.append(
-                    {
-                        "kind": "dcma",
-                        "title": "Diagnostic qualité DCMA-14",
-                        "parsed": parse_dcma_output(stdout),
-                    }
-                )
 
-            if include_montecarlo:
-                cmd = [
-                    sys.executable,
-                    str(MONTECARLO_SCRIPT),
-                    str(mpp_path),
-                    "--sims",
-                    str(sims),
-                    "--opt",
-                    str(opt),
-                    "--pess",
-                    str(pess),
-                ]
+            results = executer(mpp_path, compter_principale)
 
-                if estimates_path is not None:
-                    cmd.extend(["--estimates", str(estimates_path)])
-
-                # Répartition facultative par lot WBS (niveau 1 à 3) : le moteur
-                # simule toujours au niveau détail, seule la restitution change.
-                if macro_level is not None:
-                    cmd.extend(["--macro-level", str(macro_level)])
-
-                # Sensibilité (tornado), distribution (histogramme et courbe en S)
-                # et prévision depuis la date d'état : toujours demandées, le
-                # moteur vectorisé les rend peu coûteuses.
-                cmd.extend(["--sensibilite", "--histogramme", str(CLASSES_HISTOGRAMME),
-                            "--prevision"])
-                if correlation:
-                    cmd.extend(["--correlation", str(correlation)])
-
-                stdout = run_script(cmd, "la simulation Monte Carlo", token=client_token)
-                quota_counted = count_analysis(ip, quota_counted)
-                results.append(
-                    {
-                        "kind": "montecarlo",
-                        "title": "Simulation Monte Carlo",
-                        "parsed": parse_montecarlo_output(stdout, macro_level),
-                    }
-                )
+            # Comparaison facultative avec une version précédente : mêmes analyses,
+            # mêmes options, décomptée comme une analyse de plus. Un échec sur
+            # l'ancienne version n'empêche pas d'afficher l'analyse principale.
+            comparaison = None
+            comparaison_erreur = ""
+            if prev_path is not None:
+                prev_compte = []
+                try:
+                    precedents = executer(prev_path, lambda: prev_compte or prev_compte.append(consume_quota(ip)))
+                    comparaison = comparer(precedents, results,
+                                           secure_filename(prev_file.filename) or "version précédente")
+                except AnalysisCancelled:
+                    raise
+                except AnalysisError as exc:
+                    if exc.consumed and not prev_compte:
+                        consume_quota(ip)
+                    comparaison_erreur = f"Comparaison impossible avec la version précédente : {exc}"
 
             filename = secure_filename(mpp_file.filename) or "planning.mpp"
 
@@ -2652,7 +2838,9 @@ def analyse():
                 filename=filename,
                 labels=DCMA_LABELS,
                 verdicts=VERDICT_LABELS,
-                downloads=build_downloads(requested_exports, results, filename),
+                downloads=build_downloads(requested_exports, results, filename, comparaison),
+                comparaison=comparaison,
+                comparaison_erreur=comparaison_erreur,
             )
 
     except AnalysisCancelled:

@@ -1409,6 +1409,39 @@ check("formulaire : choix de la corrélation intra-lot", 'name="correlation"' in
 
 
 # --------------------------------------------------------------------------
+section("v1.15 : comparaison de deux versions")
+
+if (STAGE / "test_projet.xml").exists() and (STAGE / "test_liens.xml").exists():
+    _ip_cmp = "203.0.113.150"
+    _r = client.post("/analyse", data={
+        "analysis": "both", "sims": "1000", "export": ["csv", "xlsx"],
+        "mpp_file": (io.BytesIO((STAGE / "test_projet.xml").read_bytes()), "v2.mpp"),
+        "mpp_file_prev": (io.BytesIO((STAGE / "test_liens.xml").read_bytes()), "v1.mpp")},
+        content_type="multipart/form-data", headers={"X-Forwarded-For": _ip_cmp})
+    _page = _html.unescape(_r.get_data(as_text=True))
+    check("comparaison : page rendue avec la section d'évolution",
+          _r.status_code == 200 and "Évolution depuis la version précédente" in _page
+          and "v1.mpp" in _page, f"={_r.status_code}")
+    check("comparaison : 14 contrôles comparés, percentiles et dates comparés",
+          _page.count('class="badge b-') >= 14 and "P80 simulé" in _page and "Fin prévisionnelle." in _page)
+    check("comparaison : décomptée comme deux analyses", _compteur(_ip_cmp) == 2, f"={_compteur(_ip_cmp)}")
+    _lien = re.search(r'href="data:text/csv;base64,([^"]+)"', _r.get_data(as_text=True))
+    _csv_cmp = _b64.b64decode(_lien.group(1)).decode("utf-8-sig") if _lien else ""
+    check("comparaison : sections dans l'export CSV",
+          "# COMPARAISON AVEC V1.MPP — CONTRÔLES DCMA-14" in _csv_cmp
+          and "# COMPARAISON AVEC V1.MPP — MONTE CARLO" in _csv_cmp)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE usage SET count = ? WHERE ip = ?", (app.DAILY_ANALYSIS_LIMIT - 1, _ip_cmp))
+        conn.commit()
+    _r = client.post("/analyse", data={
+        "analysis": "dcma",
+        "mpp_file": (io.BytesIO(b"x"), "v2.mpp"), "mpp_file_prev": (io.BytesIO(b"y"), "v1.mpp")},
+        content_type="multipart/form-data", headers={"X-Forwarded-For": _ip_cmp})
+    check("comparaison : refusée s'il reste une seule analyse",
+          _r.status_code == 429 and "Quota insuffisant pour comparer" in _html.unescape(_r.get_data(as_text=True)))
+
+
+# --------------------------------------------------------------------------
 section("Non-régression : sortie par défaut de dcma14.py et montecarlo.py")
 import hashlib  # noqa: E402
 check("dcma14.py : sortie par défaut inchangée malgré l'option --details",

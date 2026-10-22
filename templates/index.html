@@ -37,6 +37,11 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#667085" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             <span>Votre planning est analysé dans un répertoire temporaire supprimé en fin de requête : <b>aucun fichier n’est conservé</b>. Les plannings volumineux demandent beaucoup de mémoire et peuvent être refusés.</span>
           </div>
+          <div class="field" style="margin-top:14px">
+            <label for="mpp_file_prev">Comparer avec une version précédente <span style="font-weight:400;color:var(--text-3)">(facultatif)</span></label>
+            <input type="file" id="mpp_file_prev" name="mpp_file_prev" accept=".mpp">
+            <p class="small muted" style="margin-top:6px">Même analyse sur l’ancienne version : évolution du score, des contrôles, des percentiles et de la criticité. Compte pour deux analyses du quota.</p>
+          </div>
         </div>
 
         <!-- Étape 2 : type d'analyse -->

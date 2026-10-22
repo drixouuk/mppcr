@@ -109,6 +109,95 @@
       </div>
     </div>
 
+    {# ==================== COMPARAISON AVEC UNE VERSION PRÉCÉDENTE ==================== #}
+    {% if comparaison_erreur %}
+      <div class="alert alert-warn">
+        <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>{{ comparaison_erreur }}</span>
+      </div>
+    {% endif %}
+    {% if comparaison %}{% set cp = comparaison %}
+      <div class="sec-title" id="compare">
+        <h2>Évolution depuis la version précédente</h2>
+        <span class="count">{{ cp.fichier_avant }}</span>
+        {% if cp.controles %}
+          <span class="right">
+            <span class="badge b-ok">{{ cp.bilan['Amélioré'] }} amélioré{{ 's' if cp.bilan['Amélioré'] > 1 else '' }}</span>
+            <span class="badge b-ko">{{ cp.bilan['Dégradé'] }} dégradé{{ 's' if cp.bilan['Dégradé'] > 1 else '' }}</span>
+          </span>
+        {% endif %}
+      </div>
+
+      {% if cp.score or cp.mc %}
+        <div class="mc-durations">
+          {% if cp.score and cp.score.apres is not none %}
+            <div class="dur-card">
+              <div class="d-label">Score de conformité</div>
+              <div class="d-val">{{ cp.score.apres }} <small>/100</small></div>
+              <div class="d-delta {{ 'd-dn' if (cp.score.delta or 0) >= 0 else 'd-up' }}">
+                {%- if cp.score.delta is not none %}{{ '%+d'|format(cp.score.delta) }} pts (avant : {{ cp.score.avant }}){% else %}avant : non évaluable{% endif -%}
+              </div>
+            </div>
+          {% endif %}
+          {% for m in cp.mc if m.cle in ('p50', 'p80', 'p90') %}
+            <div class="dur-card{{ ' reco' if m.cle == 'p80' else '' }}">
+              <div class="d-label">{{ m.cle|upper }} simulé</div>
+              <div class="d-val">{{ '%.1f'|format(m.apres)|replace('.', ',') }} <small>j</small></div>
+              <div class="d-delta {{ 'd-up' if m.delta > 0 else 'd-dn' }}">{{ '%+.1f'|format(m.delta)|replace('.', ',') }} j (avant : {{ '%.1f'|format(m.avant)|replace('.', ',') }} j)</div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if cp.prevision %}
+        <div class="callout">
+          <svg class="c-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span><b>Fin prévisionnelle.</b>
+            {% for r in cp.prevision %}{{ 'Planifiée' if r.cle == 'plan' else r.cle|upper }} : {{ r.apres }} (avant {{ r.avant }}, {{ '%+d'|format(r.ecart_jours) }} j){{ ' · ' if not loop.last }}{% endfor %}
+          </span>
+        </div>
+      {% endif %}
+
+      {% if cp.controles %}
+        <div class="card table-card" style="margin-top:14px">
+          <div class="table-scroll">
+            <table class="ctrl">
+              <thead><tr><th>Contrôle</th><th>Avant</th><th>Actuel</th><th>Évolution</th><th>Tâches (N° MS Project)</th></tr></thead>
+              <tbody>
+                {% for c in cp.controles %}
+                  <tr>
+                    <td class="ctrl-name">{{ c.num }}. {{ c.nom }}</td>
+                    <td class="ctrl-target">{{ c.avant|replace(".", ",") }} · {{ c.verdict_avant }}</td>
+                    <td class="ctrl-result">{{ c.apres|replace(".", ",") }} · {{ c.verdict_apres }}</td>
+                    <td><span class="badge {{ c.css }}">{{ c.evolution }}</span></td>
+                    <td class="ctrl-target">
+                      {%- if c.nouvelles %}nouvelles : {% for i in c.nouvelles[:12] %}<span class="task-id">{{ i }}</span> {% endfor %}{% if c.nouvelles|length > 12 %}… {% endif %}{% endif -%}
+                      {%- if c.resolues %}{{ ' · ' if c.nouvelles }}résolues : {% for i in c.resolues[:12] %}<span class="task-id">{{ i }}</span> {% endfor %}{% if c.resolues|length > 12 %}…{% endif %}{% endif -%}
+                      {%- if not c.nouvelles and not c.resolues %}—{% endif -%}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="small muted" style="margin-top:6px">Tâches comparées par leur numéro MS Project : la liste suppose une numérotation stable entre les deux versions.</p>
+      {% endif %}
+
+      {% if cp.criticite %}
+        <div class="sec-title"><h2>Évolution de la criticité</h2><span class="count">écart en points</span></div>
+        <div class="card crit-list">
+          {% for l in cp.criticite %}
+            <div class="crit-row">
+              <span class="crit-id" title="{{ l.nom }}">{{ l.nom }}</span>
+              <div class="crit-bar"><div class="crit-fill{{ ' hot' if l.delta > 0 }}" style="width:{{ [l.delta|abs, 100]|min }}%"></div></div>
+              <span class="crit-val">{{ '%+.1f'|format(l.delta)|replace('.', ',') }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endif %}
+
     {% if dcma %}{% set p = dcma %}{% set s = dcma.score %}
     {# ==================== DIAGNOSTIC DCMA-14 ==================== #}
     {% if p.rows and s %}
