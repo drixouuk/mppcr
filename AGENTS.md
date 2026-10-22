@@ -26,7 +26,7 @@ Documentation de référence : [`README.md`](README.md) (contrôles, score, mém
 ## Commandes
 
 - Lancer en local : `docker compose up --build` → <http://localhost:5000> (hors conteneur il faut Java + `pip install -r requirements.txt`, et `USAGE_DB_PATH` pour le compteur).
-- Production : `docker compose -f docker-compose.prod.yml up -d` sur le CT 121 (`docker.lan`, `192.168.1.87`, clé `~/.ssh/docker_lxc`).
+- Production (CT 121, `docker.lan`, `192.168.1.87`, clé `~/.ssh/docker_lxc`) : conteneur **`mpp`**, image **construite sur place** depuis le dépôt git `/mpp` (`docker-compose.yml`, `MAX_UPLOAD_MB=20`) — et non depuis GHCR. Mettre à jour : sauvegarde `cp -a /mpp /mpp.bak-<horodatage>` + `docker tag mpp-mpp mpp-mpp:<ancienne>-bak-<horodatage>`, puis dans `/mpp` `git fetch --tags && git switch --detach vX.Y.Z && docker compose up -d --build`, puis `verify_prod.sh` (copié sur l'hôte avec `test_projet.xml`, `PROJECT=…`). Réglages propres à la machine dans `/mpp/docker-compose.override.yml` (non versionné). `docker-compose.prod.yml` sert à qui déploie l'image publiée.
 - Tests : le harnais tourne **dans l'image de production** (seule à embarquer Java + MPXJ) : `tests/lancer_lxc.sh` copie le code du dépôt et le harnais dans le conteneur `mpp` du CT 121, puis exécute la commande — `tests/lancer_lxc.sh "python3 check_mppcr.py"`, `tests/lancer_lxc.sh "python3 alignment_check.py templates mppcr-redesign.html"` (copier la maquette au besoin). `STAGE=<dossier>` pour tester un autre code.
 
 ## Publier une version
