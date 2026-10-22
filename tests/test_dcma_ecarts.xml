@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Planning de test des controles 8 (duree de baseline), 10 (travail ou cout) et
+     11 (echeances de baseline passees a la date d etat, terminees ou non). -->
+<Project xmlns="http://schemas.microsoft.com/project">
+  <SaveVersion>14</SaveVersion>
+  <Name>Test ecarts DCMA MPPCR</Name>
+  <ScheduleFromStart>1</ScheduleFromStart>
+  <StartDate>2026-09-01T08:00:00</StartDate>
+  <FinishDate>2026-11-09T17:00:00</FinishDate>
+  <StatusDate>2026-10-15T08:00:00</StatusDate>
+  <MinutesPerDay>480</MinutesPerDay>
+  <MinutesPerWeek>2400</MinutesPerWeek>
+  <DaysPerMonth>20</DaysPerMonth>
+  <DefaultStartTime>08:00:00</DefaultStartTime>
+  <DefaultFinishTime>17:00:00</DefaultFinishTime>
+  <Tasks>
+    <Task>
+      <UID>1</UID>
+      <ID>1</ID>
+      <Name>T1 — 40 j planifies, 50 j en baseline</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Start>2026-09-01T08:00:00</Start>
+      <Finish>2026-10-26T17:00:00</Finish>
+      <Duration>PT320H0M0S</Duration>
+      <DurationFormat>7</DurationFormat>
+      <Work>PT0H0M0S</Work>
+      <Milestone>0</Milestone>
+      <Summary>0</Summary>
+      <PercentComplete>0</PercentComplete>
+      <ConstraintType>0</ConstraintType>
+      <Baseline>
+        <Number>0</Number>
+        <Start>2026-09-01T08:00:00</Start>
+        <Finish>2026-11-09T17:00:00</Finish>
+        <Duration>PT400H0M0S</Duration>
+        <DurationFormat>7</DurationFormat>
+      </Baseline>
+    </Task>
+    <Task>
+      <UID>2</UID>
+      <ID>2</ID>
+      <Name>T2 — avec travail affecte</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Start>2026-09-01T08:00:00</Start>
+      <Finish>2026-09-07T17:00:00</Finish>
+      <Duration>PT40H0M0S</Duration>
+      <DurationFormat>7</DurationFormat>
+      <Work>PT40H0M0S</Work>
+      <Milestone>0</Milestone>
+      <Summary>0</Summary>
+      <PercentComplete>0</PercentComplete>
+      <ConstraintType>0</ConstraintType>
+    </Task>
+    <Task>
+      <UID>3</UID>
+      <ID>3</ID>
+      <Name>T3 — echeance passee, non terminee</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Start>2026-09-21T08:00:00</Start>
+      <Finish>2026-10-30T17:00:00</Finish>
+      <Duration>PT80H0M0S</Duration>
+      <DurationFormat>7</DurationFormat>
+      <Work>PT0H0M0S</Work>
+      <Milestone>0</Milestone>
+      <Summary>0</Summary>
+      <PercentComplete>20</PercentComplete>
+      <ConstraintType>0</ConstraintType>
+      <Baseline>
+        <Number>0</Number>
+        <Start>2026-09-21T08:00:00</Start>
+        <Finish>2026-09-30T17:00:00</Finish>
+        <Duration>PT80H0M0S</Duration>
+        <DurationFormat>7</DurationFormat>
+      </Baseline>
+    </Task>
+    <Task>
+      <UID>4</UID>
+      <ID>4</ID>
+      <Name>T4 — terminee a l'heure</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Start>2026-09-14T08:00:00</Start>
+      <Finish>2026-09-18T17:00:00</Finish>
+      <Duration>PT40H0M0S</Duration>
+      <DurationFormat>7</DurationFormat>
+      <Work>PT0H0M0S</Work>
+      <Milestone>0</Milestone>
+      <Summary>0</Summary>
+      <PercentComplete>100</PercentComplete>
+      <ConstraintType>0</ConstraintType>
+      <ActualStart>2026-09-14T08:00:00</ActualStart>
+      <ActualFinish>2026-09-18T17:00:00</ActualFinish>
+      <Baseline>
+        <Number>0</Number>
+        <Start>2026-09-14T08:00:00</Start>
+        <Finish>2026-09-18T17:00:00</Finish>
+        <Duration>PT40H0M0S</Duration>
+        <DurationFormat>7</DurationFormat>
+      </Baseline>
+    </Task>
+  </Tasks>
+</Project>

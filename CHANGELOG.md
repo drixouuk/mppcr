@@ -3,6 +3,21 @@
 Les versions antérieures à la v1.6.0 sont documentées dans les
 [releases GitHub](https://github.com/drixouuk/mppcr/releases).
 
+## v1.15.0 (en cours)
+
+### Corrigé
+- **Décalages en %** : convertis comme une durée (« 500 % » donnait 1,04 j) ; ils
+  valent désormais la part correspondante de la durée du prédécesseur.
+- **Unités calendaires** (« ej », semaines et mois écoulés) : MPXJ les comptait à
+  24 h de travail par jour (2 jours calendaires = 6 jours ouvrés) ; ramenées au
+  prorata de la semaine de travail (1,43 j). Concerne décalages, durées et marges.
+- **Contrôle 8** sur la durée de baseline ; **contrôle 10** sur le travail ou le
+  coût affecté ; **contrôle 11** rapporté aux échéances de baseline passées, tâches
+  non terminées comprises. Sur le planning de référence, le contrôle 11 passe de
+  1/1 à **1/2** (référence `ref_dcma.txt` régénérée pour ce seul changement).
+- **Quota** remis à zéro à minuit heure de Paris (`APP_TIMEZONE`), et non à minuit
+  UTC ; exports datés du même jour.
+
 ## v1.14.0
 
 ### Corrigé — audit du 22/10/2026

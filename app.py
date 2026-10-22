@@ -33,8 +33,9 @@ import sys
 import tempfile
 import time
 from contextlib import closing
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import xlsxwriter
 from flask import Flask, g, render_template, request
@@ -269,8 +270,22 @@ def client_ip():
     return (request.remote_addr or "").strip() or "inconnu"
 
 
+# Fuseau du « jour » : le quota se réinitialise à minuit HEURE LOCALE, comme
+# l'annonce le message de quota, et les exports sont datés du même jour. Le
+# conteneur tourne en UTC : sans fuseau, le quota repartait à 1 h ou 2 h du matin
+# à Paris.
+try:
+    APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "Europe/Paris"))
+except (ZoneInfoNotFoundError, ValueError):
+    APP_TIMEZONE = timezone.utc
+
+
+def aujourdhui():
+    return datetime.now(APP_TIMEZONE).date()
+
+
 def today_key():
-    return date.today().isoformat()
+    return aujourdhui().isoformat()
 
 
 def quota_remaining(ip):
@@ -672,6 +687,11 @@ def dcma_comment(num, value, kind, detail, verdict):
         if num == 9:
             return "Renseigner la date d'état du projet pour contrôler la cohérence des dates."
         if num == 11:
+            motif = (verdict or "").lower()
+            if "date d'etat" in motif:
+                return "Renseigner la date d'état du projet pour mesurer les échéances de baseline manquées."
+            if "aucune echeance" in motif:
+                return "Aucune échéance de baseline n'est encore passée à la date d'état : rien à mesurer."
             return "Renseigner une baseline pour mesurer les tâches terminées en retard."
         if num == 12:
             return "Vérifier manuellement que le chemin critique est continu, crédible et piloté par la logique."
@@ -866,7 +886,10 @@ def dcma_score(parsed):
     missing = []
     if by_num.get(9, {}).get("kind") == "na":
         missing.append("date d’état du projet")
-    if by_num.get(11, {}).get("kind") == "na":
+    # Le contrôle 11 est N/A aussi quand la date d'état manque (déjà comptée) ou
+    # quand aucune échéance n'est passée : seule l'absence de baseline plafonne.
+    ligne_11 = by_num.get(11, {})
+    if ligne_11.get("kind") == "na" and "baseline manquante" in (ligne_11.get("verdict") or "").lower():
         missing.append("baseline")
 
     scored = [row for row in rows if row.get("num") not in SCORE_EXCLUDED]
@@ -1652,7 +1675,7 @@ def run_script(cmd, label, token=None):
 def export_basename(filename):
     """Nom de fichier d'export, sans accent ni espace : MPPCR_<projet>_<date>."""
     stem = secure_filename(Path(filename).stem) or "planning"
-    return f"MPPCR_{stem}_{date.today().isoformat()}"
+    return f"MPPCR_{stem}_{aujourdhui().isoformat()}"
 
 
 def build_downloads(exports, results, filename):
@@ -1827,7 +1850,7 @@ def csv_export_payload(results, filename):
     writer = CsvSansFormule(csv.writer(buffer, delimiter=";", lineterminator="\r\n"))
     writer.writerow(["MPPCR — MS Project Check & Risk"])
     writer.writerow(["Fichier analysé", filename])
-    writer.writerow(["Date de l'export", date.today().isoformat()])
+    writer.writerow(["Date de l'export", aujourdhui().isoformat()])
     writer.writerow(["Version MPPCR", APP_VERSION])
     writer.writerow(["Barème du score de conformité", SCORE_VERSION])
 
@@ -1988,7 +2011,7 @@ def xlsx_export_payload(results, filename):
         sheet.write("A2", "Fichier analysé", libelle)
         sheet.write("B2", filename)
         sheet.write("A3", "Date de l'export", libelle)
-        sheet.write("B3", date.today().isoformat())
+        sheet.write("B3", aujourdhui().isoformat())
         sheet.write("A4", "Score de conformité", libelle)
         sheet.write("B4", score.get("score", ""), score_fmt)
         sheet.write("C4", f"sur 100 — {score.get('label', '')}")

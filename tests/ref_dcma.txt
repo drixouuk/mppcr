@@ -12,7 +12,7 @@ Date d'etat du projet : 2026-10-05T08:00
 8. Duree excessive (>44j)                          0.0%  0/5              OK
 9. Dates invalides (vs date d'etat)              33.33%  2/6              A CORRIGER
 10. Taches de detail sans ressource              100.0%  5/5              INFO
-11. Taches terminees en retard vs baseline       100.0%  1/1              A CORRIGER
+11. Taches terminees en retard vs baseline        50.0%  1/2              A CORRIGER
 12. Test chemin critique (CPTest)                     -  -                N/A (verification manuelle requise)
 13. Critical Path Length Index (CPLI)               N/A  0 taches critiques  N/A (aucune tache marquee critique)
 14. Baseline Execution Index (BEI)                  0.5  1/2              A CORRIGER

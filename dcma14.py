@@ -449,14 +449,32 @@ def check_negative_float(tasks):
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
-def check_high_duration(tasks):
-    """8. High duration — % de taches de detail avec duree > 44 jours.
+def duree_reference(t):
+    """Duree de BASELINE de la tache si elle est renseignee, sinon duree planifiee.
 
-    Perimetre DCMA : taches RESTANTES, hors jalons (un jalon n'a pas de duree)."""
+    Le referentiel mesure la duree excessive sur la duree de baseline : c'est
+    l'engagement initial qu'il faut decouper, pas une duree deja rallongee par
+    les glissements. Faute de baseline, la duree planifiee reste le seul repere."""
+    try:
+        baseline = t.getBaselineDuration()
+    except Exception:
+        baseline = None
+    if baseline is not None and duration_days(baseline) > 0:
+        return duration_days(baseline)
+    return duration_days(t.getDuration())
+
+
+def check_high_duration(tasks):
+    """8. High duration — % de taches de detail avec une duree de baseline
+    (a defaut, planifiee) superieure a 44 jours.
+
+    Perimetre DCMA : taches RESTANTES, hors jalons (un jalon n'a pas de duree).
+    La condition « periode de planification detaillee / rolling wave » du
+    referentiel n'est pas appliquee : le fichier ne porte pas cette information."""
     real = [t for t in tasks if is_remaining(t) and not t.getMilestone()]
     if not real:
         return 0.0, 0, 0
-    bad_tasks = [t for t in real if duration_days(t.getDuration()) > HIGH_DURATION_DAYS]
+    bad_tasks = [t for t in real if duree_reference(t) > HIGH_DURATION_DAYS]
     record_detail(8, bad_tasks)
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
@@ -481,41 +499,71 @@ def check_invalid_dates(tasks, status_date):
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
-def check_resources(tasks):
-    """10. Resources — % de taches de detail sans ressource affectee
-    (indicatif, pas de seuil DCMA strict).
+def a_travail_ou_cout(t):
+    """Vrai si la tache porte du travail (heures) ou un cout affecte."""
+    try:
+        travail = t.getWork()
+        if travail is not None and float(travail.getDuration()) > 0:
+            return True
+    except Exception:
+        pass
+    try:
+        cout = t.getCost()
+        if cout is not None and float(cout) > 0:
+            return True
+    except Exception:
+        pass
+    return False
 
-    Perimetre DCMA : taches RESTANTES, hors jalons."""
-    real = [t for t in tasks if is_remaining(t) and not t.getMilestone()]
+
+def check_resources(tasks):
+    """10. Resources — % de taches de detail de duree non nulle sans travail
+    ni cout affecte (indicatif, pas de seuil DCMA strict).
+
+    Perimetre DCMA : taches RESTANTES, hors jalons et taches de duree nulle.
+    Une ressource nommee sans heures ni cout ne compte pas : c'est la charge
+    affectee que le referentiel verifie, pas la presence d'un nom."""
+    real = [t for t in tasks if is_remaining(t) and not t.getMilestone()
+            and duration_days(t.getDuration()) > 0]
     if not real:
         return 0.0, 0, 0
-    bad_tasks = []
-    for t in real:
-        names = t.getResourceNames()
-        if names is None or str(names).strip() == "":
-            bad_tasks.append(t)
+    bad_tasks = [t for t in real if not a_travail_ou_cout(t)]
     record_detail(10, bad_tasks)
     return pct(len(bad_tasks), len(real)), len(bad_tasks), len(real)
 
 
 def check_missed_tasks(tasks, status_date):
-    """11. Missed tasks — % de taches terminees apres leur date de fin
-    de reference (baseline). Necessite une baseline renseignee."""
+    """11. Missed tasks — parmi les taches dont l'echeance de baseline est
+    passee a la date d'etat, % de celles terminees (ou prevues) APRES cette
+    echeance.
+
+    Denominateur du referentiel : les taches qui DEVAIENT etre finies a la date
+    d'etat. L'ancienne version comptait les taches ayant une date reelle de fin,
+    ce qui ignorait les taches en retard pas encore terminees -- les pires.
+    Necessite une baseline et une date d'etat. Rend (valeur, ecarts, echeances,
+    motif) ; le motif explique un N/A."""
+    if status_date is None:
+        return None, 0, 0, "date d'etat manquante"
     real = [t for t in tasks if is_real_task(t)]
-    checked = 0
+    dues = []
     bad_tasks = []
+    avec_baseline = 0
     for t in real:
         bf = t.getBaselineFinish()
-        af = t.getActualFinish()
-        if bf is None or af is None:
+        if bf is not None:
+            avec_baseline += 1
+        if bf is None or bf.isAfter(status_date):
             continue
-        checked += 1
-        if af.isAfter(bf):
+        dues.append(t)
+        fin = t.getActualFinish() or t.getFinish()
+        if fin is None or fin.isAfter(bf):
             bad_tasks.append(t)
     record_detail(11, bad_tasks)
-    if checked == 0:
-        return None, 0, 0
-    return pct(len(bad_tasks), checked), len(bad_tasks), checked
+    if not dues:
+        motif = ("aucune echeance de baseline passee" if avec_baseline
+                 else "baseline manquante")
+        return None, 0, 0, motif
+    return pct(len(bad_tasks), len(dues)), len(bad_tasks), len(dues), ""
 
 
 def check_bei(tasks, status_date):
@@ -719,10 +767,10 @@ def run_diagnostic(path):
     v, n, t = check_resources(tasks)
     rows.append(("10. Taches de detail sans ressource", f"{v}%", f"{n}/{t}", "INFO"))
 
-    v, n, t = check_missed_tasks(tasks, status_date)
+    v, n, t, motif = check_missed_tasks(tasks, status_date)
     rows.append(("11. Taches terminees en retard vs baseline",
                   f"{v}%" if v is not None else "N/A", f"{n}/{t}" if v is not None else "-",
-                  verdict(v, 5.0) if v is not None else "N/A (baseline manquante)"))
+                  verdict(v, 5.0) if v is not None else f"N/A ({motif})"))
 
     rows.append(("12. Test chemin critique (CPTest)", "-", "-",
                   "N/A (verification manuelle requise)"))

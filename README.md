@@ -110,6 +110,7 @@ location / {
 | `MAX_CONCURRENT_ANALYSES` | `2` | Nombre d'analyses lourdes menées de front, tous visiteurs confondus (au moins 1). |
 | `MAX_UPLOAD_MB` | `5` | Taille maximale du planning accepté, en Mo : 5 Mo dans l'image et dans `docker-compose.prod.yml`, 20 Mo dans `docker-compose.yml` (build local). Au-delà, refus avec un message explicite. |
 | `JAVA_TOOL_OPTIONS` | `-Xmx1536m …` | Mémoire allouée à la JVM d'analyse (voir « Mémoire et plannings volumineux »). |
+| `APP_TIMEZONE` | `Europe/Paris` | Fuseau du « jour » : le quota se réinitialise à minuit dans ce fuseau, et les exports sont datés du même jour (le conteneur tourne en UTC). |
 | `TRUSTED_PROXIES` | *(vide)* | Adresses du ou des reverse proxies, séparées par des virgules (ex. `192.168.1.141`). Renseignée, l'IP du visiteur n'est lue dans `X-Forwarded-For` que pour les requêtes venant de ces adresses : un accès direct au port 5000 ne peut plus se fabriquer une nouvelle IP à chaque requête pour contourner le quota. Vide : en-tête accepté de tous (comportement historique, à réserver à un port joignable par le seul proxy). |
 
 `USAGE_DB_PATH` existe uniquement pour lancer l'application hors conteneur :
@@ -186,14 +187,21 @@ donnaient 0,93 au lieu de 0,85. Une tâche critique ayant une marge ≤ 0, le CP
 calculé ne dépasse pas 1 : mesurer une avance demanderait une échéance
 contractuelle, que le planning ne porte pas de façon fiable.
 
-**Écarts connus** par rapport au texte du référentiel, non corrigés à ce stade car
-ils touchent la *définition* des métriques et non leur population : le contrôle 8
-utilise la durée planifiée au lieu de la **durée de baseline** et n'applique pas la
-condition de « période de planification détaillée ou rolling wave » ; le contrôle 11
-compte au dénominateur les tâches ayant une date réelle de fin plutôt que celles
-dont l'échéance de baseline est passée ; le contrôle 10 n'applique pas la condition
-« durée supérieure à zéro avec charge en heures ou en devise affectée ». À traiter
-sur décision explicite, mesure avant/après à l'appui.
+**Écarts au référentiel corrigés en v1.15.0.** Le contrôle 8 mesure la **durée de
+baseline** (à défaut, la durée planifiée) ; le contrôle 10 signale les tâches de
+durée non nulle **sans travail ni coût** affecté (un nom de ressource sans charge ne
+suffit plus) ; le contrôle 11 rapporte les tâches manquées au nombre de tâches dont
+l'**échéance de baseline est passée** à la date d'état, terminées ou non — une tâche
+en retard pas encore finie compte désormais. Reste non appliquée : la condition
+« période de planification détaillée / rolling wave » du contrôle 8, que le fichier
+ne porte pas.
+
+**Unités.** Un décalage en **%** est la part correspondante de la durée du
+prédécesseur (50 % d'une tâche de 10 j = 5 j). Les unités **calendaires** (« ej »,
+semaines ou mois écoulés) sont ramenées en jours ouvrés au prorata de la semaine de
+travail : 2 jours calendaires = 1,43 jour ouvré. Jusqu'à la v1.14.0, MPXJ les
+convertissait à 24 h de travail par jour (2 ej = 6 j ouvrés), et un décalage en %
+donnait une valeur sans rapport.
 
 ## Simulation Monte Carlo
 

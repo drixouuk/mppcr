@@ -1328,6 +1328,33 @@ if (STAGE / "test_lags.xml").exists():
 else:
     check("fixture test_lags.xml présente", False, "absente")
 
+section("v1.15 : écarts DCMA corrigés (contrôles 8, 10, 11) et fuseau du quota")
+
+if (STAGE / "test_dcma_ecarts.xml").exists():
+    _ecarts = app.parse_dcma_output(app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "dcma14.py"), "test_dcma_ecarts.xml", "--details"],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=300).stdout or ""))
+    _par_num = {r["num"]: r for r in _ecarts["rows"]}
+    check("contrôle 8 : durée de baseline (50 j) retenue plutôt que la durée planifiée (40 j)",
+          _par_num[8]["detail"] == "1/3" and _ecarts["task_details"].get(8) == [1],
+          f"={_par_num[8]['detail']} {_ecarts['task_details'].get(8)}")
+    check("contrôle 10 : une tâche avec du travail affecté n'est pas signalée",
+          _par_num[10]["detail"] == "2/3" and _ecarts["task_details"].get(10) == [1, 3],
+          f"={_par_num[10]['detail']} {_ecarts['task_details'].get(10)}")
+    check("contrôle 11 : échéance de baseline passée et tâche non terminée = manquée",
+          _par_num[11]["detail"] == "1/2" and _ecarts["task_details"].get(11) == [3],
+          f"={_par_num[11]['detail']} {_ecarts['task_details'].get(11)}")
+else:
+    check("fixture test_dcma_ecarts.xml présente", False, "absente")
+
+check("contrôle 11 sans échéance passée : N/A sans plafonner le score « baseline »",
+      "baseline" not in app.dcma_score({"rows": [
+          {"num": 11, "kind": "na", "verdict": "N/A (aucune echeance de baseline passee)"},
+          {"num": 1, "kind": "ok", "verdict": "OK"}]})["missing"])
+check("quota : journée comptée dans le fuseau de l'application (Europe/Paris par défaut)",
+      str(app.APP_TIMEZONE) == "Europe/Paris"
+      and app.today_key() == _dt.now(app.APP_TIMEZONE).date().isoformat())
+
 
 # --------------------------------------------------------------------------
 section("Non-régression : sortie par défaut de dcma14.py et montecarlo.py")
