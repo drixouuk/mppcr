@@ -11,11 +11,10 @@ par jour calendaire (DAILY_ANALYSIS_LIMIT, défaut 5), compté dans un fichier
 SQLite partagé par les workers Gunicorn. Le nombre d'analyses lourdes menées
 de front est plafonné par MAX_CONCURRENT_ANALYSES.
 
-POINT D'EXTENSION AUTH :
-Ajouter flask-httpauth ou Flask-BasicAuth, puis protéger index() et analyse().
-Le healthcheck /healthz peut rester public pour le reverse proxy.
-Aucune authentification n'est intégrée : voir la section « Sécurité » du
-README avant toute exposition sur Internet.
+Authentification facultative : AUTH_USERS (« nom:empreinte » séparés par des
+virgules) protège toutes les pages par HTTP Basic, sauf /healthz. Sans cette
+variable, aucune authentification : voir la section « Sécurité » du README
+avant toute exposition sur Internet.
 """
 
 import base64
@@ -42,6 +41,7 @@ import xlsxwriter
 import rapport_pdf
 from flask import Flask, g, render_template, request
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -80,6 +80,53 @@ def csp_nonce():
     if "csp_nonce" not in g:
         g.csp_nonce = secrets.token_urlsafe(16)
     return g.csp_nonce
+
+
+# Comptes autorisés : « nom:empreinte » séparés par des virgules. L'empreinte est
+# celle de Werkzeug (« scrypt:… » ou « pbkdf2:… »), produite par :
+#   python3 -c "from werkzeug.security import generate_password_hash as g; print(g('mot de passe'))"
+# Aucun mot de passe en clair dans la configuration. Vide : pas d'authentification.
+def lire_comptes(brut):
+    comptes = {}
+    for entree in (brut or "").split(","):
+        nom, separateur, empreinte = entree.strip().partition(":")
+        if nom and separateur and empreinte:
+            comptes[nom] = empreinte
+    return comptes
+
+
+AUTH_USERS = lire_comptes(os.environ.get("AUTH_USERS", ""))
+if os.environ.get("AUTH_USERS") and not AUTH_USERS:
+    app.logger.error("AUTH_USERS est renseignée mais illisible : aucun compte chargé.")
+
+
+def identifiants_valides(autorisation):
+    if autorisation is None or autorisation.type != "basic":
+        return False
+    empreinte = AUTH_USERS.get(autorisation.username or "")
+    if empreinte is None:
+        # Même coût de calcul qu'un compte existant : le temps de réponse ne
+        # révèle pas si le nom d'utilisateur existe.
+        check_password_hash(next(iter(AUTH_USERS.values())), autorisation.password or "")
+        return False
+    return check_password_hash(empreinte, autorisation.password or "")
+
+
+@app.before_request
+def exiger_authentification():
+    """HTTP Basic sur toutes les pages sauf /healthz, si AUTH_USERS est renseignée.
+    À n'utiliser que derrière HTTPS (NPMplus) : le mot de passe circule encodé,
+    pas chiffré."""
+    if not AUTH_USERS or request.endpoint == "healthz":
+        return None
+    if identifiants_valides(request.authorization):
+        return None
+    return (
+        render_template("error.html", title="Authentification requise", variant="warn",
+                        message="Cette instance de MPPCR est réservée : identifiez-vous pour continuer."),
+        401,
+        {"WWW-Authenticate": 'Basic realm="MPPCR", charset="UTF-8"'},
+    )
 
 
 @app.after_request

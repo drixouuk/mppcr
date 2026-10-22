@@ -9,7 +9,9 @@
 #   ./lancer_lxc.sh "python3 alignment_check.py templates mppcr-redesign.html"
 #
 # Tous les scripts et fichiers de test de tests/ (*.py, *.xml, *.txt, *.mpp) et
-# la maquette v2 sont envoyés à la racine de /tmp/harness, à côté du code.
+# la maquette v2 sont envoyés à la racine de /tmp/harness, à côté du code ; les
+# scripts d'enquête dans /tmp/harness/enquetes (code de l'application dans le
+# PYTHONPATH : « python3 enquetes/structure_wbs.py test_projet.xml »).
 #   ./lancer_lxc.sh "sh -c 'cat /tmp/mppcr-preview/les-deux.html'" | head
 set -euo pipefail
 
@@ -28,7 +30,7 @@ tar czf "$ARCHIVE" \
                 requirements.txt docker-compose.yml docker-compose.prod.yml \
                 .gitignore .github README.md CHANGELOG.md \
     -C "$STAGE/docs/maquettes" mppcr-redesign.html \
-    -C "$CHECK" $(cd "$CHECK" && ls -- *.py *.xml *.txt *.mpp 2>/dev/null) \
+    -C "$CHECK" $(cd "$CHECK" && ls -- *.py *.xml *.txt *.mpp 2>/dev/null) enquetes \
     -C "$(dirname "$DEPS")" "$(basename "$DEPS")"
 
 scp "${SSHOPT[@]}" "$ARCHIVE" "$HOST:/tmp/mppcr-harness.tgz"
@@ -39,5 +41,5 @@ ssh "${SSHOPT[@]}" "$HOST" '
   docker exec mpp tar xzf /tmp/harness/archive.tgz -C /tmp/harness'
 
 if [ "$#" -gt 0 ]; then
-  ssh "${SSHOPT[@]}" "$HOST" "docker exec -w /tmp/harness -e PYTHONPATH=/tmp/harness/.mppcr-deps mpp $*"
+  ssh "${SSHOPT[@]}" "$HOST" "docker exec -w /tmp/harness -e PYTHONPATH=/tmp/harness/.mppcr-deps:/tmp/harness mpp $*"
 fi

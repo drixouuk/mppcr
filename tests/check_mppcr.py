@@ -1467,6 +1467,30 @@ check("formulaire : export PDF proposé", 'value="pdf"' in client.get("/").get_d
 
 
 # --------------------------------------------------------------------------
+section("v1.15 : authentification facultative (AUTH_USERS)")
+
+from werkzeug.security import generate_password_hash as _gph  # noqa: E402
+
+_comptes_avant = app.AUTH_USERS
+try:
+    app.AUTH_USERS = app.lire_comptes("alice:" + _gph("s3cret"))
+    _auth = lambda u, m: {"Authorization": "Basic " + _b64.b64encode(f"{u}:{m}".encode()).decode()}
+    _r = client.get("/")
+    check("auth : page refusée sans identifiants (401 + WWW-Authenticate)",
+          _r.status_code == 401 and _r.headers.get("WWW-Authenticate", "").startswith("Basic"))
+    check("auth : mauvais mot de passe et compte inconnu refusés",
+          client.get("/", headers=_auth("alice", "faux")).status_code == 401
+          and client.get("/", headers=_auth("bob", "s3cret")).status_code == 401)
+    check("auth : bon compte accepté", client.get("/", headers=_auth("alice", "s3cret")).status_code == 200)
+    check("auth : /healthz reste public", client.get("/healthz").status_code == 200)
+    check("auth : analyse protégée", client.post("/analyse").status_code == 401)
+finally:
+    app.AUTH_USERS = _comptes_avant
+check("auth : désactivée par défaut", client.get("/").status_code == 200)
+check("auth : configuration illisible -> aucun compte", app.lire_comptes("sans-separateur, :x") == {})
+
+
+# --------------------------------------------------------------------------
 section("Non-régression : sortie par défaut de dcma14.py et montecarlo.py")
 import hashlib  # noqa: E402
 check("dcma14.py : sortie par défaut inchangée malgré l'option --details",
