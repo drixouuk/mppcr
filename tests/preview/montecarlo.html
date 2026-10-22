@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>PROJET-X.mpp — MPPCR</title>
+<style>
+/* ============================================================
+   MPPCR v2 — Design tokens
+   ============================================================ */
+:root{
+  --bg:#F4F6F9;
+  --surface:#FFFFFF;
+  --surface-2:#F9FAFB;
+  --border:#E4E7EC;
+  --border-strong:#D0D5DD;
+  --text:#101828;
+  --text-2:#475467;
+  --text-3:#667085;
+  --text-4:#98A2B3;
+
+  --primary:#2E5BFF;
+  --primary-dark:#1E40D8;
+  --primary-soft:#EEF2FF;
+
+  --ok:#12B76A;        --ok-bg:#ECFDF3;   --ok-border:#A6F4C5;
+  --ko:#F04438;        --ko-bg:#FEF3F2;   --ko-border:#FECDCA;
+  --warn:#DC6803;      --warn-bg:#FFFAEB; --warn-border:#FEDF89;
+  --na:#475467;        --na-bg:#F2F4F7;   --na-border:#E4E7EC;
+
+  --r-sm:8px; --r-md:12px; --r-lg:16px;
+  --shadow-sm:0 1px 2px rgba(16,24,40,.06);
+  --shadow-md:0 4px 12px -2px rgba(16,24,40,.10);
+  --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono","SFMono-Regular",Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.container{max-width:1120px;margin:0 auto;padding:0 24px}
+h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:17px;font-weight:650}
+h3{font-size:14px;font-weight:650}
+.muted{color:var(--text-2)}
+.small{font-size:13px}
+.mono{font-family:var(--mono);font-size:.92em}
+
+/* ============================================================
+   Header
+   ============================================================ */
+header.top{
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:50;
+}
+.top-inner{display:flex;align-items:center;gap:20px;height:60px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--text)}
+.brand-mark{
+  width:34px;height:34px;border-radius:9px;
+  background:linear-gradient(135deg,#2E5BFF 0%,#1E40D8 100%);
+  color:#fff;font-weight:800;font-size:15px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 6px rgba(46,91,255,.35);
+}
+.brand-name{font-weight:700;font-size:16px;letter-spacing:-.01em}
+.brand-sub{font-size:12px;color:var(--text-3);font-weight:500}
+.version-tag{
+  font-size:11.5px;font-weight:600;color:var(--text-3);
+  background:var(--surface-2);border:1px solid var(--border);
+  padding:2px 8px;border-radius:99px;
+}
+/* Stepper */
+.stepper{margin-left:auto;display:flex;align-items:center;gap:4px}
+.step{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:99px;text-decoration:none;color:var(--text-3);font-size:13px;font-weight:550;transition:.15s}
+.step .n{
+  width:20px;height:20px;border-radius:50%;
+  background:var(--surface-2);border:1.5px solid var(--border-strong);
+  color:var(--text-3);font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+}
+.step.active{background:var(--primary-soft);color:var(--primary-dark)}
+.step.active .n{background:var(--primary);border-color:var(--primary);color:#fff}
+.step.done{color:var(--ok)}
+.step.done .n{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+.step-sep{color:var(--border-strong);font-size:12px}
+
+/* CSS-only view switch (maquette) */
+#view-toggle{display:none}
+main .view{display:none}
+#tab-form:checked ~ main #view-form{display:block}
+#tab-result:checked ~ main #view-result{display:block}
+#tab-form:checked ~ header .step-form,
+#tab-result:checked ~ header .step-result{background:var(--primary-soft);color:var(--primary-dark)}
+#tab-form:checked ~ header .step-form .n,
+#tab-result:checked ~ header .step-result .n{background:var(--primary);border-color:var(--primary);color:#fff}
+
+/* ============================================================
+   Page head
+   ============================================================ */
+.page-head{padding:36px 0 8px}
+.page-head h1{margin-bottom:4px}
+.page-head p{color:var(--text-2)}
+
+/* ============================================================
+   Form — 3 steps layout
+   ============================================================ */
+.form-grid{display:grid;grid-template-columns:1fr 360px;gap:24px;padding:20px 0 64px;align-items:start}
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);box-shadow:var(--shadow-sm);
+}
+.card-pad{padding:22px 24px}
+.step-label{
+  display:flex;align-items:center;gap:10px;margin-bottom:16px;
+}
+.step-num{
+  width:26px;height:26px;border-radius:8px;flex:none;
+  background:var(--primary-soft);color:var(--primary-dark);
+  font-size:13px;font-weight:750;display:flex;align-items:center;justify-content:center;
+}
+/* Dropzone */
+.dropzone{
+  border:2px dashed var(--border-strong);border-radius:var(--r-md);
+  background:var(--surface-2);
+  padding:44px 24px;text-align:center;cursor:pointer;
+  transition:border-color .15s, background .15s;
+}
+.dropzone:hover{border-color:var(--primary);background:var(--primary-soft)}
+.dz-icon{
+  width:52px;height:52px;border-radius:14px;margin:0 auto 14px;
+  background:var(--surface);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:var(--shadow-sm);
+}
+.dz-title{font-size:15.5px;font-weight:600}
+.dz-title b{color:var(--primary)}
+.dz-hint{font-size:13px;color:var(--text-3);margin-top:4px}
+.dz-file{
+  margin-top:14px;display:inline-flex;align-items:center;gap:8px;
+  background:var(--surface);border:1px solid var(--ok-border);
+  padding:6px 14px;border-radius:99px;font-size:13px;font-weight:600;color:var(--ok);
+}
+.privacy-note{
+  margin-top:14px;display:flex;gap:10px;align-items:flex-start;
+  font-size:12.5px;color:var(--text-3);
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--r-sm);padding:10px 14px;
+}
+.privacy-note svg{flex:none;margin-top:1px}
+
+/* Analysis type radio cards */
+.type-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.type-card{position:relative}
+.type-card input{position:absolute;opacity:0;pointer-events:none}
+.type-card label{
+  display:block;border:1.5px solid var(--border);border-radius:var(--r-md);
+  padding:16px;cursor:pointer;background:var(--surface);
+  transition:border-color .15s, box-shadow .15s, background .15s;height:100%;
+}
+.type-card label:hover{border-color:var(--border-strong)}
+.type-card input:checked + label{
+  border-color:var(--primary);background:var(--primary-soft);
+  box-shadow:0 0 0 3px rgba(46,91,255,.12);
+}
+.type-card input:focus-visible + label{outline:2px solid var(--primary);outline-offset:2px}
+.type-title{display:flex;align-items:center;gap:9px;font-weight:650;font-size:14px;margin-bottom:5px}
+.type-title .radio{
+  width:17px;height:17px;border-radius:50%;border:2px solid var(--border-strong);
+  flex:none;position:relative;transition:.15s;background:#fff;
+}
+.type-card input:checked + label .radio{border-color:var(--primary)}
+.type-card input:checked + label .radio::after{
+  content:"";position:absolute;inset:3px;border-radius:50%;background:var(--primary);
+}
+.type-desc{font-size:12.5px;color:var(--text-2);line-height:1.45}
+
+/* Options (details) */
+details.opt{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+details.opt + details.opt{margin-top:10px}
+details.opt summary{
+  list-style:none;cursor:pointer;padding:14px 18px;
+  display:flex;align-items:center;gap:10px;
+  font-weight:600;font-size:13.5px;color:var(--text);
+}
+details.opt summary::-webkit-details-marker{display:none}
+details.opt summary .chev{margin-left:auto;color:var(--text-3);transition:transform .15s}
+details.opt[open] summary .chev{transform:rotate(90deg)}
+details.opt summary:hover{color:var(--primary-dark)}
+.opt-body{padding:2px 18px 18px;border-top:1px solid var(--border)}
+.check-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px dashed var(--border)}
+.check-row:last-child{border-bottom:none}
+.check-row input{width:17px;height:17px;accent-color:var(--primary)}
+.check-row .lbl{font-weight:550;font-size:13.5px}
+.check-row .sub{font-size:12px;color:var(--text-3)}
+.field label{display:block;font-size:12.5px;font-weight:600;color:var(--text-2);margin:12px 0 6px}
+.field select,.field input[type=number],.field input[type=file]{
+  width:100%;padding:9px 12px;border:1px solid var(--border-strong);
+  border-radius:var(--r-sm);font-size:13.5px;font-family:inherit;background:#fff;color:var(--text);
+}
+.field select:focus,.field input:focus{outline:2px solid var(--primary);outline-offset:1px;border-color:var(--primary)}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* Sticky CTA panel */
+.cta-panel{position:sticky;top:84px}
+.cta-panel .card-pad{padding:20px}
+.cta-summary{font-size:13px;color:var(--text-2);margin-bottom:14px}
+.cta-summary b{color:var(--text)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  border-radius:var(--r-sm);font-weight:600;font-size:14.5px;
+  padding:12px 20px;cursor:pointer;border:1px solid transparent;
+  text-decoration:none;transition:.15s;font-family:inherit;width:100%;
+}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:0 2px 8px rgba(46,91,255,.3)}
+.btn-primary:hover{background:var(--primary-dark);box-shadow:0 4px 14px rgba(46,91,255,.4)}
+.btn-ghost{background:var(--surface);border-color:var(--border-strong);color:var(--text-2)}
+.btn-ghost:hover{border-color:var(--text-4);color:var(--text)}
+.btn-sm{padding:8px 14px;font-size:13px;width:auto}
+.quota{
+  margin-top:14px;display:flex;align-items:center;gap:9px;
+  font-size:12.5px;color:var(--text-3);
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--r-sm);padding:10px 13px;
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px var(--ok-bg)}
+.confid{margin-top:10px;font-size:12px;color:var(--text-4);display:flex;gap:8px;align-items:center}
+
+/* ============================================================
+   RESULT PAGE
+   ============================================================ */
+.result-head{padding:28px 0 4px;display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.back-link{
+  display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+  color:var(--text-2);text-decoration:none;margin-bottom:10px;
+}
+.back-link:hover{color:var(--primary)}
+.file-chip{
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:99px;padding:6px 14px;font-size:13px;font-weight:600;
+}
+.file-chip .ext{color:var(--primary);font-weight:750}
+.meta-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.meta-chip{
+  font-size:12.5px;color:var(--text-2);background:var(--surface);
+  border:1px solid var(--border);border-radius:99px;padding:4px 12px;
+}
+.meta-chip b{color:var(--text);font-weight:700}
+.head-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+
+/* Score hero */
+.score-hero{margin-top:18px;overflow:hidden}
+.score-hero-inner{display:grid;grid-template-columns:230px 1fr;gap:0}
+.score-left{
+  padding:26px 28px;border-right:1px solid var(--border);
+  background:linear-gradient(160deg,#FFFAEB 0%,#FEF3F2 100%);
+}
+.score-num{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.score-num span{font-size:20px;font-weight:600;color:var(--text-3)}
+.band-badge{
+  display:inline-flex;align-items:center;gap:6px;margin-top:8px;
+  font-size:12.5px;font-weight:700;padding:3px 11px;border-radius:99px;
+  background:rgba(240,68,56,.12);color:#B42318;
+}
+.band-badge .bdot{width:7px;height:7px;border-radius:50%;background:#F04438}
+.score-right{padding:24px 28px}
+.score-bar-wrap{margin:14px 0 8px}
+.score-bar{
+  height:12px;border-radius:99px;background:var(--surface-2);
+  border:1px solid var(--border);position:relative;overflow:hidden;
+}
+.score-fill{
+  height:100%;border-radius:99px;width:60%;
+  background:linear-gradient(90deg,#F79009,#F04438);
+}
+.score-ticks{position:relative;height:16px;margin-top:5px}
+.tick{position:absolute;font-size:10.5px;color:var(--text-4);transform:translateX(-50%)}
+.tick::before{content:"";position:absolute;top:-5px;left:50%;width:1px;height:5px;background:var(--border-strong)}
+.score-formula{font-size:12.5px;color:var(--text-3);margin-top:8px}
+
+/* KPI strip */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:16px}
+.kpi{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:16px 18px;box-shadow:var(--shadow-sm);
+  border-top:3px solid var(--border-strong);
+}
+.kpi.k-ok{border-top-color:var(--ok)} .kpi.k-ko{border-top-color:var(--ko)}
+.kpi.k-na{border-top-color:var(--na)} .kpi.k-info{border-top-color:var(--primary)}
+.kpi .k-label{font-size:11.5px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)}
+.kpi .k-val{font-size:30px;font-weight:750;letter-spacing:-.02em;margin-top:3px;line-height:1.15}
+.kpi .k-sub{font-size:12px;color:var(--text-3)}
+
+/* Alerts */
+.alert{
+  display:flex;gap:13px;align-items:flex-start;
+  border-radius:var(--r-md);padding:15px 18px;margin-top:16px;
+  font-size:13.5px;border:1px solid;
+}
+.alert .a-icon{flex:none;margin-top:1px}
+.alert-warn{background:var(--warn-bg);border-color:var(--warn-border);color:#93370D}
+.alert-danger{background:var(--ko-bg);border-color:var(--ko-border);color:#B42318}
+.alert-info{background:var(--primary-soft);border-color:#C7D7FE;color:#1E40D8}
+.alert b{font-weight:700}
+.alert .alert-action{
+  margin-left:auto;flex:none;align-self:center;
+  background:var(--surface);border:1px solid currentColor;border-radius:var(--r-sm);
+  padding:7px 14px;font-size:12.5px;font-weight:650;cursor:pointer;color:inherit;
+  font-family:inherit;white-space:nowrap;
+}
+.alert .alert-action:hover{background:rgba(0,0,0,.04)}
+
+/* Section titles */
+.sec-title{
+  display:flex;align-items:center;gap:12px;margin:34px 0 14px;
+}
+.sec-title h2{letter-spacing:-.01em}
+.sec-title .count{
+  font-size:12px;font-weight:700;background:var(--surface);border:1px solid var(--border);
+  color:var(--text-2);border-radius:99px;padding:2px 10px;
+}
+.sec-title .right{margin-left:auto}
+
+/* Priorities */
+details.prio{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);box-shadow:var(--shadow-sm)}
+details.prio + details.prio{margin-top:10px}
+details.prio summary{
+  list-style:none;cursor:pointer;display:flex;align-items:center;gap:14px;
+  padding:15px 18px;
+}
+details.prio summary::-webkit-details-marker{display:none}
+.prio-rank{
+  width:30px;height:30px;border-radius:9px;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:750;
+}
+.pr-ko{background:var(--ko-bg);color:#B42318}
+.pr-warn{background:var(--warn-bg);color:#93370D}
+.pr-na{background:var(--na-bg);color:var(--text-2)}
+.prio-name{font-weight:650;font-size:14px}
+.prio-metric{font-size:12.5px;color:var(--text-3);margin-top:1px}
+.prio-chev{margin-left:auto;color:var(--text-3)}
+.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:99px;
+  border:1px solid;white-space:nowrap;
+}
+.b-ko{background:var(--ko-bg);color:#B42318;border-color:var(--ko-border)}
+.b-warn{background:var(--warn-bg);color:#93370D;border-color:var(--warn-border)}
+.b-ok{background:var(--ok-bg);color:#067647;border-color:var(--ok-border)}
+.b-na{background:var(--na-bg);color:var(--text-2);border-color:var(--na-border)}
+.b-info{background:var(--primary-soft);color:var(--primary-dark);border-color:#C7D7FE}
+.prio-body{padding:14px 18px 16px 62px;border-top:1px solid var(--border);font-size:13.5px;color:var(--text-2)}
+.prio-body .reco{font-weight:600;color:var(--text);margin-bottom:10px}
+.task-ids{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.task-id{
+  font-family:var(--mono);font-size:11.5px;font-weight:600;
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:6px;padding:2px 8px;color:var(--text-2);
+}
+
+/* Controls table */
+.table-card{overflow:hidden}
+.table-scroll{overflow-x:auto}
+table.ctrl{width:100%;border-collapse:collapse;font-size:13px;min-width:860px}
+table.ctrl thead th{
+  text-align:left;font-size:11.5px;font-weight:650;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--text-3);background:var(--surface-2);
+  padding:11px 16px;border-bottom:1px solid var(--border);
+  position:sticky;top:0;
+}
+table.ctrl td{padding:13px 16px;border-bottom:1px solid var(--border);vertical-align:top}
+table.ctrl tbody tr:last-child td{border-bottom:none}
+table.ctrl tbody tr:hover{background:var(--surface-2)}
+td.ctrl-name{font-weight:650;color:var(--text);white-space:nowrap}
+td .frac{display:block;font-size:11.5px;color:var(--text-3);font-weight:500}
+td.ctrl-result{font-weight:700;white-space:nowrap}
+td.ctrl-target{color:var(--text-3);white-space:nowrap}
+td.ctrl-action{color:var(--text-2);max-width:340px}
+.row-ko{background:rgba(254,243,242,.35)}
+
+/* Monte Carlo */
+.mc-durations{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.dur-card{
+  background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r-md);
+  padding:18px 20px;position:relative;
+}
+.dur-card .d-label{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+.dur-card .d-val{font-size:32px;font-weight:800;letter-spacing:-.02em;margin-top:4px}
+.dur-card .d-val small{font-size:15px;font-weight:600;color:var(--text-3)}
+.dur-card .d-delta{font-size:12.5px;font-weight:650;margin-top:2px}
+.dur-card.reco{border-color:var(--ok);box-shadow:0 0 0 3px rgba(18,183,106,.12)}
+.dur-card.reco::after{
+  content:"Recommandé";position:absolute;top:-11px;right:14px;
+  background:var(--ok);color:#fff;font-size:10.5px;font-weight:700;
+  letter-spacing:.04em;text-transform:uppercase;
+  padding:3px 10px;border-radius:99px;
+}
+.dur-card.ref{background:var(--surface-2)}
+.d-up{color:#B42318}.d-dn{color:#067647}.d-ref{color:var(--text-3);font-weight:500}
+
+/* Distribution axis */
+.axis-card{margin-top:14px;padding:26px 28px 20px}
+.axis{position:relative;height:8px;border-radius:99px;background:var(--surface-2);border:1px solid var(--border);margin:34px 10px 6px}
+.axis-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,#C7D7FE,#2E5BFF);opacity:.55}
+.marker{position:absolute;top:-26px;transform:translateX(-50%);text-align:center}
+.marker .m-val{font-size:12px;font-weight:750}
+.marker .m-lab{font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.marker::after{
+  content:"";position:absolute;top:20px;left:50%;transform:translateX(-50%);
+  width:2px;height:14px;background:var(--text-3);
+}
+.marker.m-cpm::after{background:var(--text-4)}
+.m-cpm .m-val{color:var(--text-3)}
+.m-p80 .m-val{color:var(--ok)}
+.axis-caption{display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-4);padding:2px 10px}
+.mc-meta{font-size:12.5px;color:var(--text-3);margin-top:16px;padding-top:14px;border-top:1px dashed var(--border)}
+
+/* Decision callout */
+.callout{
+  margin-top:14px;display:flex;gap:13px;
+  background:var(--primary-soft);border:1px solid #C7D7FE;
+  border-radius:var(--r-md);padding:16px 18px;font-size:13.5px;color:#1E3A8A;
+}
+.callout .c-icon{flex:none;margin-top:1px}
+.callout b{color:#1E40D8}
+
+/* Criticality */
+.crit-list{padding:8px 0}
+.crit-row{display:grid;grid-template-columns:70px 1fr 62px;align-items:center;gap:14px;padding:7px 24px}
+.crit-row:hover{background:var(--surface-2)}
+.crit-id{font-family:var(--mono);font-size:12px;font-weight:650;color:var(--text-2)}
+.crit-bar{height:16px;border-radius:5px;background:var(--surface-2);overflow:hidden;position:relative}
+.crit-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#F79009,#F04438)}
+.crit-fill.hot{background:linear-gradient(90deg,#F04438,#D92D20)}
+.crit-val{font-size:12.5px;font-weight:700;text-align:right;color:var(--text-2)}
+.crit-note{
+  margin:10px 24px 16px;font-size:12.5px;color:var(--text-3);
+  display:flex;align-items:center;gap:8px;background:var(--warn-bg);
+  border:1px solid var(--warn-border);border-radius:var(--r-sm);padding:9px 13px;
+}
+
+/* Tabs inside results (DCMA / MC) */
+.subnav{display:flex;gap:4px;margin-top:26px;border-bottom:1px solid var(--border)}
+.subnav a{
+  padding:10px 16px;font-size:13.5px;font-weight:600;color:var(--text-3);
+  text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;
+}
+.subnav a.active{color:var(--primary);border-bottom-color:var(--primary)}
+
+/* Legend */
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--text-3);align-items:center}
+.legend .li{display:flex;align-items:center;gap:6px}
+.lg{width:10px;height:10px;border-radius:3px;display:inline-block}
+
+/* Footer */
+footer{border-top:1px solid var(--border);margin-top:56px;background:var(--surface)}
+.foot-inner{display:flex;align-items:center;gap:18px;padding:20px 0;font-size:12.5px;color:var(--text-3);flex-wrap:wrap}
+.foot-inner .sep{color:var(--border-strong)}
+.foot-inner .right{margin-left:auto;display:flex;gap:14px;align-items:center}
+
+/* Responsive */
+@media(max-width:960px){
+  .form-grid{grid-template-columns:1fr}
+  .cta-panel{position:static}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  .mc-durations{grid-template-columns:repeat(2,1fr)}
+  .type-grid{grid-template-columns:1fr}
+  .score-hero-inner{grid-template-columns:1fr}
+  .score-left{border-right:none;border-bottom:1px solid var(--border)}
+  .stepper .step .s-lab{display:none}
+  .brand-sub{display:none}
+  .head-actions{margin-left:0}
+}
+@media(max-width:640px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .mc-durations{grid-template-columns:1fr}
+  .container{padding:0 16px}
+  .crit-row{grid-template-columns:56px 1fr 54px;gap:8px;padding:7px 16px}
+}
+</style>
+<style>
+/* ============================================================
+   Rendu serveur — ajouts nécessaires, hors maquette
+   ------------------------------------------------------------
+   La maquette est une page unique dont les deux vues sont basculées
+   par deux boutons radio (main .view{display:none} + :checked) : ici
+   chaque écran est une page à part entière, sans JavaScript.
+   ============================================================ */
+main .view{display:block}
+[hidden]{display:none !important}
+
+/* Zone de dépôt : l'input natif couvre la zone en pointillés (clic,
+   clavier et glisser-déposer natifs, sans JavaScript). */
+.dropzone{position:relative;display:block}
+.dropzone input[type=file]{
+  position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;
+}
+
+/* Bandes du score de conformité : la maquette ne montre que le cas
+   « fragile » (60/100) ; les trois autres bandes reprennent les couleurs
+   des jetons et des repères du score. */
+.score-left .k-label{
+  font-size:11.5px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.06em;color:#93370D;
+}
+.score-left.bd-ok .k-label{color:#067647}
+.score-left.bd-mid .k-label{color:#4D7C0F}
+.score-left.bd-ko .k-label{color:#B42318}
+.score-left.bd-ok{background:linear-gradient(160deg,#ECFDF3 0%,#F6FEF9 100%)}
+.score-left.bd-mid{background:linear-gradient(160deg,#F7FEE7 0%,#ECFDF3 100%)}
+.score-left.bd-ko{background:linear-gradient(160deg,#FEF3F2 0%,#FEE4E2 100%)}
+.score-fill.bd-ok{background:linear-gradient(90deg,#84CC16,#12B76A)}
+.score-fill.bd-mid{background:linear-gradient(90deg,#F79009,#84CC16)}
+.score-fill.bd-ko{background:linear-gradient(90deg,#F04438,#D92D20)}
+.band-badge.bd-ok{background:rgba(18,183,106,.12);color:#067647}
+.band-badge.bd-ok .bdot{background:var(--ok)}
+.band-badge.bd-mid{background:rgba(132,204,22,.16);color:#4D7C0F}
+.band-badge.bd-mid .bdot{background:#84CC16}
+.band-badge.bd-ko{background:rgba(240,68,56,.12);color:#B42318}
+.band-badge.bd-ko .bdot{background:var(--ko)}
+
+/* Criticité : la maquette montre des identifiants courts (T-0149) ; le rendu
+   serveur affiche le nom des tâches, tronqué s'il dépasse la colonne. */
+.crit-row{grid-template-columns:200px 1fr 62px}
+.crit-id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:640px){
+  .crit-row{grid-template-columns:120px 1fr 54px}
+}
+
+/* Sortie brute repliée (diagnostic) : composant de la maquette, contenu
+   technique propre au rendu serveur. */
+.opt-body pre{
+  font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--text-2);
+  white-space:pre-wrap;overflow-x:auto;max-height:340px;margin-top:6px;
+}
+
+/* Page d'attente de l'analyse (affichée par le JavaScript au moment de
+   l'envoi) et bouton d'arrêt. */
+.overlay{
+  position:fixed;inset:0;z-index:100;padding:24px;
+  background:rgba(16,24,40,.55);
+  display:flex;align-items:center;justify-content:center;
+}
+.overlay-card{max-width:460px;width:100%;text-align:center}
+.overlay-spin{
+  width:34px;height:34px;border-radius:50%;margin:0 auto 12px;
+  border:3px solid var(--border);border-top-color:var(--primary);
+  animation:overlay-spin .8s linear infinite;
+}
+@keyframes overlay-spin{to{transform:rotate(360deg)}}
+.overlay-title{font-weight:700;font-size:16px;margin-bottom:6px}
+.overlay-step{font-size:12.5px;color:var(--text-3);margin-top:4px}
+.is-empty .dot{background:var(--ko);box-shadow:0 0 0 3px var(--ko-bg)}
+
+/* Éléments <a> portant une classe prévue pour un <label> ou un <button>. */
+.back-link{text-decoration:none}
+.alert-action{text-decoration:none}
+
+/* Impression : la page de résultat doit rester lisible sur papier
+   (bouton « Imprimer / PDF » de la maquette). */
+@media print{
+  header.top,.subnav,.head-actions,.no-print{display:none !important}
+  body{background:#fff}
+  footer{margin-top:24px}
+  .card,.score-hero,.dur-card,.kpi{box-shadow:none}
+  .table-scroll{overflow:visible}
+  .card,.table-card,.crit-list,.dur-card{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= HEADER ================= -->
+<header class="top">
+  <div class="container top-inner">
+    <a class="brand" href="/" data-quit>
+      <span class="brand-mark">M</span>
+      <span>
+        <span class="brand-name">MPPCR</span><br>
+        <span class="brand-sub">MS Project Check &amp; Risk</span>
+      </span>
+    </a>
+    <span class="version-tag">v1.13.0</span>
+
+    <nav class="stepper" aria-label="Étapes de l’analyse">
+      
+  <a class="step" href="/" data-quit title="Quitter ce résultat : l’analyse devra être relancée pour être réaffichée"><span class="n">1</span><span class="s-lab">Nouvelle analyse</span></a>
+  <span class="step-sep">&rsaquo;</span>
+  
+    <span class="step" title="Aucun diagnostic DCMA-14 dans cette analyse"><span class="n">2</span><span class="s-lab">Diagnostic DCMA-14</span></span>
+  
+  <span class="step-sep">&rsaquo;</span>
+  
+    <a class="step active" aria-current="true" href="#mc"><span class="n">3</span><span class="s-lab">Monte Carlo</span></a>
+  
+
+    </nav>
+  </div>
+</header>
+
+<main>
+  
+
+
+
+
+
+
+
+
+
+<section class="view" id="view-result">
+  <div class="container">
+
+    
+    <div class="result-head">
+      <div>
+        <a class="back-link" href="/" data-quit>‹ Nouvelle analyse</a>
+        <div>
+          <span class="file-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            <span class="ext">.mpp</span> PROJET-X
+          </span>
+          
+        </div>
+        <div class="meta-chips">
+          
+          
+            <span class="meta-chip"><b>7</b> tâches de détail</span>
+          
+          
+            <span class="meta-chip"><b>5</b> liens de dépendance</span>
+          
+          
+            <span class="meta-chip"><b>500</b> simulations</span>
+          
+          
+        </div>
+      </div>
+      <div class="head-actions">
+        
+        
+          <span class="btn btn-ghost btn-sm" title="Cochez « CSV » dans le formulaire pour obtenir ce fichier avec l’analyse">
+            
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            
+            CSV
+          </span>
+        
+          <span class="btn btn-ghost btn-sm" title="Cochez « Excel » dans le formulaire pour obtenir ce fichier avec l’analyse">
+            
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            
+            Excel
+          </span>
+        
+        <button class="btn btn-ghost btn-sm" type="button" id="print-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer / PDF
+        </button>
+      </div>
+    </div>
+
+    
+
+    
+    
+    
+    
+    
+      
+      
+      
+      
+    
+      
+      
+      
+      
+    
+      
+      
+      
+      
+    
+      
+      
+      
+      
+    
+    
+    
+    
+      
+    
+      
+    
+      
+    
+      
+    
+
+    <div class="sec-title" id="mc">
+      <h2>Simulation Monte Carlo</h2>
+      <span class="count">500 simulations</span>
+      <span class="right">
+        
+          <span class="badge b-ok">Simulation exploitable</span>
+        
+      </span>
+    </div>
+
+    
+
+    
+
+    
+
+    
+      
+        <div class="mc-durations" style="margin-top:16px">
+          
+            
+            <div class="dur-card ref">
+              <div class="d-label">Déterministe (CPM)</div>
+              <div class="d-val">47,0 <small>j</small></div>
+              <div class="d-delta d-ref">référence, pas un engagement</div>
+            </div>
+          
+            
+            <div class="dur-card">
+              <div class="d-label">P50 — Médiane</div>
+              <div class="d-val">48,5 <small>j</small></div>
+              <div class="d-delta d-up">+1,5 j vs CPM</div>
+            </div>
+          
+            
+            <div class="dur-card reco">
+              <div class="d-label">P80 — Objectif planning</div>
+              <div class="d-val" style="color:var(--ok)">51,0 <small>j</small></div>
+              <div class="d-delta d-up">+4,0 j vs CPM</div>
+            </div>
+          
+            
+            <div class="dur-card">
+              <div class="d-label">P90 — Prudent</div>
+              <div class="d-val">52,3 <small>j</small></div>
+              <div class="d-delta d-up">+5,3 j vs CPM</div>
+            </div>
+          
+        </div>
+
+        
+        
+          
+          <div class="card axis-card">
+            <div class="axis">
+              
+                <div class="axis-fill" style="left:2%;width:74.5%"></div>
+              
+              
+                <div class="marker m-cpm"
+                     style="left:2.0%">
+                  <div class="m-val">47</div>
+                  <div class="m-lab">CPM</div>
+                </div>
+              
+                <div class="marker"
+                     style="left:29.2%">
+                  <div class="m-val">48</div>
+                  <div class="m-lab">P50</div>
+                </div>
+              
+                <div class="marker m-p80"
+                     style="left:74.5%">
+                  <div class="m-val">51</div>
+                  <div class="m-lab">P80</div>
+                </div>
+              
+                <div class="marker"
+                     style="left:98.0%">
+                  <div class="m-val">52</div>
+                  <div class="m-lab">P90</div>
+                </div>
+              
+            </div>
+            <div class="axis-caption">
+              <span>Durée simulée (jours)</span>
+              <span>500 tirages PERT</span>
+            </div>
+            
+              <div class="mc-meta">Incertitude P50 → P90 : <b>3,8 j · 7,8 % du P50 — incertitude faible</b> (repère : &lt; 25 %)</div>
+            
+          </div>
+        
+
+        
+          <div class="callout">
+            <svg class="c-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+            <span><b>Lecture décisionnelle.</b> Pour un objectif de planning à 80 % de confiance, viser 51,0 j, soit 4,0 j de contingence par rapport à la durée déterministe (47,0 j). Pour un engagement prudent à 90 %, viser 52,3 j (+5,3 j vs CPM).</span>
+          </div>
+        
+      
+
+      
+        <div class="sec-title"><h2>Indice de criticité par tâche</h2><span class="count">% sur le chemin critique</span></div>
+        <div class="card crit-list">
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Analyse des besoins">Analyse des besoins</span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100.0%"></div></div>
+              <span class="crit-val">100,0 %</span>
+            </div>
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Conception détaillée">Conception détaillée</span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100.0%"></div></div>
+              <span class="crit-val">100,0 %</span>
+            </div>
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Développement">Développement</span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100.0%"></div></div>
+              <span class="crit-val">100,0 %</span>
+            </div>
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Tests unitaires">Tests unitaires</span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100.0%"></div></div>
+              <span class="crit-val">100,0 %</span>
+            </div>
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Recette utilisateur">Recette utilisateur</span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100.0%"></div></div>
+              <span class="crit-val">100,0 %</span>
+            </div>
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Jalon — fin de projet">Jalon — fin de projet</span>
+              <div class="crit-bar"><div class="crit-fill hot" style="width:100.0%"></div></div>
+              <span class="crit-val">100,0 %</span>
+            </div>
+          
+            <div class="crit-row">
+              <span class="crit-id" title="Tâche orpheline sans lien">Tâche orpheline sans lien</span>
+              <div class="crit-bar"><div class="crit-fill" style="width:0.0%"></div></div>
+              <span class="crit-val">0,0 %</span>
+            </div>
+          
+          <div class="crit-note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Surveillez en priorité les tâches au-delà de 70 % de criticité.
+          </div>
+        </div>
+      
+    
+
+    
+      <details class="opt" style="margin-top:14px">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Sortie brute de la simulation
+          <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </summary>
+        <div class="opt-body"><pre>========================================================================
+SIMULATION MONTE CARLO — /tmp/harness/test_projet.xml
+========================================================================
+Taches de detail : 7
+Liens de dependance : 5
+Taches gelees (achevees ou externes) : 1 -- duree connue, aucune incertitude simulee
+Simulations : 500
+
+Duree deterministe (chemin critique, durees planifiees) : 47.0 j
+P50 (mediane simulee)  : 48.5 j  (+1.5 j vs planifie)
+P80                    : 51.0 j  (+4.0 j vs planifie)
+P90                    : 52.3 j  (+5.3 j vs planifie)
+
+Indice de criticite par tache (top 10 -- % de simulations sur le chemin critique) :
+  Analyse des besoins         100.0%
+  Conception détaillée        100.0%
+  Développement               100.0%
+  Tests unitaires             100.0%
+  Recette utilisateur         100.0%
+  Jalon — fin de projet       100.0%
+  Tâche orpheline sans lien     0.0%
+
+</pre></div>
+      </details>
+    
+    
+
+  </div>
+</section>
+
+<script>
+  (function () {
+    // Impression : le bouton de la maquette n'obéit qu'au JavaScript, sans lui
+    // l'impression reste accessible par le navigateur.
+    var bouton = document.getElementById("print-btn");
+    if (bouton) bouton.addEventListener("click", function () { window.print(); });
+
+    // Garde-fou : quitter un résultat le perd définitivement (il naît d'un POST
+    // et n'est conservé nulle part). Amélioration progressive uniquement.
+    if (!window.confirm) return;
+    var message =
+      "Quitter ce résultat ?\n\n" +
+      "L’analyse affichée ne sera plus accessible : il faudra la relancer sur le même fichier " +
+      "(1 analyse décomptée de votre quota).\n\n" +
+      "Le bouton Précédent du navigateur permet de revenir à ce résultat sans relancer l’analyse.";
+    [].forEach.call(document.querySelectorAll("[data-quit]"), function (lien) {
+      lien.addEventListener("click", function (ev) {
+        if (!window.confirm(message)) ev.preventDefault();
+      });
+    });
+  })();
+</script>
+
+</main>
+
+<footer>
+  <div class="container foot-inner">
+    <span><b style="color:var(--text-2)">MPPCR</b> v1.13.0 · MS Project Check &amp; Risk</span>
+    <span class="sep">·</span>
+    <span>Aucun planning conservé après analyse</span>
+    <span class="right">
+      <span class="legend">
+        <span class="li"><span class="lg" style="background:var(--ok)"></span>Conforme</span>
+        <span class="li"><span class="lg" style="background:var(--ko)"></span>À corriger</span>
+        <span class="li"><span class="lg" style="background:var(--warn)"></span>Attention</span>
+      </span>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>

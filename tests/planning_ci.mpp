@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Name>Planning de test CI</Name>
+  <StatusDate>2026-10-05T08:00:00</StatusDate>
+  <StartDate>2026-09-01T08:00:00</StartDate>
+  <FinishDate>2026-11-30T17:00:00</FinishDate>
+  <MinutesPerDay>480</MinutesPerDay>
+  <Tasks>
+    <Task><UID>1</UID><ID>1</ID><Name>Analyse</Name><Duration>PT80H0M0S</Duration>
+      <DurationFormat>7</DurationFormat><Start>2026-09-01T08:00:00</Start>
+      <Finish>2026-09-14T17:00:00</Finish><PercentComplete>100</PercentComplete>
+      <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+      <Baseline><Number>0</Number><Duration>PT80H0M0S</Duration></Baseline></Task>
+    <Task><UID>2</UID><ID>2</ID><Name>Conception</Name><Duration>PT64H0M0S</Duration>
+      <DurationFormat>7</DurationFormat><Start>2026-09-15T08:00:00</Start>
+      <Finish>2026-09-24T17:00:00</Finish><PercentComplete>50</PercentComplete>
+      <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+      <Baseline><Number>0</Number><Duration>PT64H0M0S</Duration></Baseline>
+      <PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+    <Task><UID>3</UID><ID>3</ID><Name>Developpement</Name><Duration>PT160H0M0S</Duration>
+      <DurationFormat>7</DurationFormat><Start>2026-09-25T08:00:00</Start>
+      <Finish>2026-10-22T17:00:00</Finish><PercentComplete>20</PercentComplete>
+      <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+      <Baseline><Number>0</Number><Duration>PT160H0M0S</Duration></Baseline>
+      <PredecessorLink><PredecessorUID>2</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+    <Task><UID>4</UID><ID>4</ID><Name>Recette</Name><Duration>PT32H0M0S</Duration>
+      <DurationFormat>7</DurationFormat><Start>2026-10-23T08:00:00</Start>
+      <Finish>2026-10-28T17:00:00</Finish><PercentComplete>0</PercentComplete>
+      <Summary>0</Summary><Milestone>0</Milestone><ConstraintType>0</ConstraintType>
+      <Baseline><Number>0</Number><Duration>PT32H0M0S</Duration></Baseline>
+      <PredecessorLink><PredecessorUID>3</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+  </Tasks>
+</Project>

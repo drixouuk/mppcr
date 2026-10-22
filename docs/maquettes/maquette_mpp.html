@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MPPCR — MS Project Check &amp; Risk</title>
+<style>
+  /* ============ DESIGN TOKENS ============ */
+  :root{
+    --bg:#f6f7f9;
+    --surface:#ffffff;
+    --surface-2:#fbfcfd;
+    --border:#e3e6ea;
+    --border-strong:#d0d4da;
+
+    --text:#16181d;
+    --text-2:#4b5563;
+    --text-3:#8a94a3;
+
+    --brand:#2456e6;
+    --brand-600:#1c46c4;
+    --brand-soft:#eef3ff;
+
+    --ok:#1a9e5c;
+    --ok-soft:#e6f7ee;
+    --warn:#c77d0a;
+    --warn-soft:#fdf3e3;
+    --err:#d14343;
+    --err-soft:#fdecec;
+    --info:#2456e6;
+    --info-soft:#eef3ff;
+    --na:#8a94a3;
+    --na-soft:#eef0f3;
+
+    --radius:12px;
+    --radius-sm:8px;
+    --shadow-sm:0 1px 2px rgba(16,24,40,.05);
+    --shadow:0 1px 3px rgba(16,24,40,.08),0 4px 16px rgba(16,24,40,.06);
+    --shadow-lg:0 8px 32px rgba(16,24,40,.12);
+
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    font-family:var(--font);
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.5;
+    font-size:15px;
+  }
+  ::selection{background:var(--brand);color:#fff}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* ============ HEADER ============ */
+  .topbar{
+    position:sticky;top:0;z-index:40;
+    background:rgba(255,255,255,.85);
+    backdrop-filter:saturate(180%) blur(10px);
+    border-bottom:1px solid var(--border);
+  }
+  .topbar-in{display:flex;align-items:center;gap:16px;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.01em}
+  .brand-mark{
+    width:28px;height:28px;border-radius:8px;
+    background:linear-gradient(135deg,var(--brand),#5b8cff);
+    display:grid;place-items:center;color:#fff;font-size:12px;font-weight:800;
+  }
+  .brand-sub{color:var(--text-3);font-weight:500;font-size:13px;margin-left:2px}
+  .tabs{margin-left:auto;display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:4px}
+  .tab{
+    border:0;background:transparent;cursor:pointer;font:inherit;font-size:13px;font-weight:600;
+    color:var(--text-2);padding:7px 14px;border-radius:7px;transition:.15s;
+    display:flex;align-items:center;gap:7px;
+  }
+  .tab .n{font-size:11px;color:var(--text-3);font-weight:700}
+  .tab:hover{color:var(--text)}
+  .tab[aria-selected="true"]{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
+  .tab[aria-selected="true"] .n{color:var(--brand)}
+
+  /* ============ LAYOUT / PANELS ============ */
+  .panel{display:none;padding:36px 0 72px}
+  .panel.active{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .page-head{margin-bottom:28px}
+  .page-head h1{font-size:24px;letter-spacing:-.02em;font-weight:700}
+  .page-head p{color:var(--text-2);margin-top:4px;font-size:14px}
+
+  .card{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius);box-shadow:var(--shadow-sm);
+  }
+  .card + .card{margin-top:20px}
+  .card-pad{padding:22px}
+  .card-head{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:16px 22px;border-bottom:1px solid var(--border);
+  }
+  .card-head h2{font-size:15px;font-weight:700}
+  .card-head .meta{font-size:12.5px;color:var(--text-3)}
+
+  /* ============ BADGES ============ */
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;font-weight:600;line-height:1;padding:5px 9px;border-radius:999px;
+    white-space:nowrap;
+  }
+  .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .b-ok{background:var(--ok-soft);color:var(--ok)}
+  .b-err{background:var(--err-soft);color:var(--err)}
+  .b-warn{background:var(--warn-soft);color:var(--warn)}
+  .b-info{background:var(--info-soft);color:var(--info)}
+  .b-na{background:var(--na-soft);color:var(--na)}
+  .b-neutral{background:var(--na-soft);color:var(--text-2)}
+
+  /* ============ FORM ============ */
+  .field{margin-bottom:22px}
+  .field > label,.field > .flabel{display:block;font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)}
+  .hint{font-size:12.5px;color:var(--text-3);margin-top:6px}
+
+  .drop{
+    position:relative;border:1.5px dashed var(--border-strong);border-radius:var(--radius);
+    padding:34px 24px;text-align:center;cursor:pointer;transition:.18s;background:var(--surface-2);
+  }
+  .drop:hover,.drop:focus-within{border-color:var(--brand);background:var(--brand-soft)}
+  .drop.drag{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 4px rgba(36,86,230,.12)}
+  .drop .ic{width:42px;height:42px;margin:0 auto 12px;border-radius:12px;background:var(--brand-soft);display:grid;place-items:center}
+  .drop .ic svg{width:20px;height:20px;stroke:var(--brand)}
+  .drop .t1{font-weight:600;font-size:14px}
+  .drop .t1 .link{color:var(--brand);text-decoration:underline;text-underline-offset:2px}
+  .drop .t2{font-size:12.5px;color:var(--text-3);margin-top:3px}
+  .drop input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .drop .fname{margin-top:10px;font-size:13px;color:var(--brand);font-weight:600;display:none}
+  .drop.hasfile .fname{display:block}
+
+  .choices{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .choice{position:relative}
+  .choice input{position:absolute;opacity:0;pointer-events:none}
+  .choice label{
+    display:flex;flex-direction:column;gap:6px;cursor:pointer;
+    border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;
+    transition:.15s;background:var(--surface);height:100%;
+  }
+  .choice label:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
+  .choice .ct{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+  .choice .cd{font-size:12.5px;color:var(--text-3);line-height:1.45}
+  .choice .tick{
+    width:16px;height:16px;border-radius:5px;border:1.5px solid var(--border-strong);
+    display:inline-grid;place-items:center;flex:none;transition:.15s;background:var(--surface);
+  }
+  .choice input:checked + label{border-color:var(--brand);background:var(--brand-soft);box-shadow:0 0 0 3px rgba(36,86,230,.14)}
+  .choice input:checked + label .tick{background:var(--brand);border-color:var(--brand)}
+  .choice input:checked + label .tick svg{opacity:1}
+  .choice input:focus-visible + label{outline:2px solid var(--brand);outline-offset:2px}
+  .choice .tick svg{width:10px;height:10px;stroke:#fff;stroke-width:3;opacity:0}
+
+  details.adv{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);margin-bottom:22px}
+  details.adv summary{
+    cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;
+    padding:13px 16px;font-size:13px;font-weight:600;color:var(--text-2);
+  }
+  details.adv summary::-webkit-details-marker{display:none}
+  details.adv summary .chev{transition:.18s;display:inline-flex}
+  details.adv[open] summary .chev{transform:rotate(90deg)}
+  details.adv .adv-body{padding:4px 16px 18px;border-top:1px solid var(--border);margin-top:-1px;padding-top:16px}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+
+  .in{
+    width:100%;font:inherit;font-size:14px;color:var(--text);
+    border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+    padding:9px 12px;background:var(--surface);transition:.15s;
+  }
+  .in:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(36,86,230,.14)}
+  .in::placeholder{color:var(--text-3)}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    font:inherit;font-size:14px;font-weight:600;cursor:pointer;
+    background:var(--brand);color:#fff;border:0;border-radius:var(--radius-sm);
+    padding:12px 22px;transition:.15s;box-shadow:var(--shadow-sm);
+  }
+  .btn:hover{background:var(--brand-600)}
+  .btn:active{transform:translateY(1px)}
+  .btn-block{width:100%}
+  .btn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+  .quota{
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    margin-top:16px;font-size:12.5px;color:var(--text-3);
+  }
+  .quota .pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(26,158,92,.5);animation:pulse 2s infinite}
+  @keyframes pulse{70%{box-shadow:0 0 0 7px rgba(26,158,92,0)}100%{box-shadow:0 0 0 0 rgba(26,158,92,0)}}
+
+  /* ============ RESULT HEADER ============ */
+  .result-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+  .file-chip{
+    display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text-2);
+  }
+  .file-chip svg{width:15px;height:15px;stroke:var(--text-3)}
+
+  /* ============ KPI CARDS ============ */
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+  .kpi{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px 18px;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;
+  }
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--kc,var(--border-strong))}
+  .kpi .kl{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+  .kpi .kv{font-size:26px;font-weight:700;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums}
+  .kpi-ok{--kc:var(--ok)} .kpi-err{--kc:var(--err)} .kpi-na{--kc:var(--na)} .kpi-info{--kc:var(--info)} .kpi-total{--kc:var(--text-3)}
+
+  /* ============ CALLOUT ============ */
+  .callout{
+    display:flex;gap:12px;border-radius:var(--radius);padding:15px 17px;margin-bottom:20px;
+    border:1px solid;font-size:14px;line-height:1.5;
+  }
+  .callout .ci{flex:none;width:20px;height:20px;margin-top:1px}
+  .c-err{background:var(--err-soft);border-color:#f3c1c1;color:#8f2626}
+  .c-warn{background:var(--warn-soft);border-color:#f0d7a8;color:#7a4c04}
+  .c-info{background:var(--info-soft);border-color:#c4d4f7;color:#1c3f9e}
+
+  /* ============ PRIORITIES ============ */
+  .prio{display:flex;flex-direction:column}
+  .prio-item{display:flex;gap:16px;padding:18px 0;border-bottom:1px solid var(--border)}
+  .prio-item:last-child{border-bottom:0;padding-bottom:0}
+  .prio-item:first-child{padding-top:0}
+  .prio-num{
+    flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;
+  }
+  .pn-err{background:var(--err-soft);color:var(--err)}
+  .pn-na{background:var(--na-soft);color:var(--text-2)}
+  .prio-body{flex:1;min-width:0}
+  .prio-title{font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .prio-metric{font-size:13px;color:var(--text-2);margin-top:3px}
+  .prio-metric .target{color:var(--text-3)}
+  .prio-action{font-size:13.5px;color:var(--text-2);margin-top:8px;padding-left:11px;border-left:2px solid var(--border);line-height:1.5}
+
+  /* ============ TABLE ============ */
+  .tbl-wrap{overflow-x:auto;border-radius:var(--radius)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:680px}
+  thead th{
+    text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--text-3);padding:11px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);
+    white-space:nowrap;
+  }
+  tbody td{padding:13px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:var(--surface-2)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .ctrl-name{font-weight:600;color:var(--text)}
+  .ctrl-name .idx{color:var(--text-3);font-weight:500;margin-right:6px}
+  .ctrl-sub{font-size:12px;color:var(--text-3);margin-top:2px}
+  .val{font-weight:600;font-variant-numeric:tabular-nums}
+  .val-sub{font-size:12px;color:var(--text-3);font-weight:400;margin-top:2px}
+  .target-cell{color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .act{color:var(--text-2);font-size:13px;line-height:1.45;max-width:300px}
+
+  /* ============ RAW OUTPUT ============ */
+  details.raw{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);margin-top:20px}
+  details.raw summary{cursor:pointer;padding:13px 16px;font-size:13px;font-weight:600;color:var(--text-2);list-style:none;display:flex;align-items:center;gap:8px}
+  details.raw summary::-webkit-details-marker{display:none}
+  details.raw pre{
+    padding:16px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;
+    color:var(--text-2);border-top:1px solid var(--border);background:#0f1420;color:#c7d0e0;border-radius:0 0 var(--radius) var(--radius);
+  }
+
+  /* ============ MONTE CARLO ============ */
+  .dur-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:8px}
+  .dur{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px;position:relative;box-shadow:var(--shadow-sm);
+  }
+  .dur .dl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+  .dur .dv{font-size:24px;font-weight:700;letter-spacing:-.02em;margin-top:7px;font-variant-numeric:tabular-nums}
+  .dur .dv small{font-size:13px;font-weight:600;color:var(--text-3);margin-left:2px}
+  .dur .dd{font-size:12px;color:var(--text-3);margin-top:5px}
+  .dur .rec{
+    position:absolute;top:12px;right:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    background:var(--ok-soft);color:var(--ok);padding:3px 8px;border-radius:999px;
+  }
+  .dur.is-rec{border-color:var(--ok);box-shadow:0 0 0 3px rgba(26,158,92,.12)}
+
+  /* scale viz */
+  .scale{margin:26px 4px 8px;position:relative;padding-top:34px;height:74px}
+  .scale-track{position:absolute;left:0;right:0;top:44px;height:6px;border-radius:99px;background:linear-gradient(90deg,#dfe4ea,#eef1f5)}
+  .scale-fill{position:absolute;left:0;top:44px;height:6px;border-radius:99px;background:linear-gradient(90deg,var(--brand),#7aa2ff)}
+  .scale-mark{position:absolute;top:26px;transform:translateX(-50%);text-align:center}
+  .scale-mark .pin{width:2px;height:26px;background:var(--border-strong);margin:0 auto}
+  .scale-mark .ml{font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;position:absolute;top:-16px;left:50%;transform:translateX(-50%);white-space:nowrap}
+  .scale-mark .mv{font-size:11.5px;color:var(--text-2);margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .scale-mark.mk-cpm .pin{background:var(--text-3)}
+  .scale-mark.mk-p80 .pin{background:var(--ok);height:34px;top:-4px}
+  .scale-mark.mk-p80 .ml{color:var(--ok)}
+
+  /* criticality bars */
+  .crit{display:flex;flex-direction:column;gap:13px}
+  .crit-row{display:grid;grid-template-columns:minmax(180px,300px) 1fr 64px;gap:14px;align-items:center}
+  .crit-name{font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crit-bar{height:10px;border-radius:99px;background:var(--na-soft);overflow:hidden}
+  .crit-fill{height:100%;border-radius:99px;background:var(--fc,var(--brand))}
+  .cf-high{--fc:var(--err)} .cf-med{--fc:var(--warn)} .cf-low{--fc:var(--ok)}
+  .crit-val{font-size:13px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+  .cv-high{color:var(--err)} .cv-med{color:var(--warn)} .cv-low{color:var(--text-2)}
+  .crit-thresh{position:relative}
+  .crit-note{font-size:12px;color:var(--text-3);margin-top:16px;display:flex;align-items:center;gap:8px}
+
+  .decision{
+    display:flex;gap:14px;background:linear-gradient(135deg,#f0f5ff,#f7faff);
+    border:1px solid #cddcff;border-radius:var(--radius);padding:18px 20px;margin-top:22px;
+  }
+  .decision .di{flex:none;width:22px;height:22px;stroke:var(--brand);margin-top:1px}
+  .decision .dt{font-weight:600;font-size:14px;color:#17337e;margin-bottom:3px}
+  .decision .db{font-size:13.5px;color:#2a3f6e;line-height:1.55}
+  .decision b{color:#17337e}
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width:820px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .kpi-total{grid-column:1/-1}
+    .choices{grid-template-columns:1fr}
+    .grid4{grid-template-columns:repeat(2,1fr)}
+    .dur-grid{grid-template-columns:repeat(2,1fr)}
+    .crit-row{grid-template-columns:1fr;gap:6px}
+    .crit-val{text-align:left}
+    .tabs{overflow-x:auto}
+    .brand-sub{display:none}
+    .scale{display:none}
+  }
+  @media (max-width:520px){
+    .grid4,.kpis,.dur-grid{grid-template-columns:1fr}
+    .wrap{padding:0 16px}
+  }
+
+  /* ============ PRINT ============ */
+  @media print{
+    .topbar,.tabs,.btn,.drop,details.raw summary{display:none!important}
+    body{background:#fff}
+    .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid}
+    .panel{display:block!important;padding:0 0 24px}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ TOP BAR ============ -->
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">
+      <span class="brand-mark">M</span>
+      MPPCR
+      <span class="brand-sub">MS Project Check &amp; Risk</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Vues">
+      <button class="tab" role="tab" aria-selected="true" data-t="form"><span class="n">①</span> Formulaire</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="dcma"><span class="n">②</span> Résultat DCMA-14</button>
+      <button class="tab" role="tab" aria-selected="false" data-t="mc"><span class="n">③</span> Résultat Monte Carlo</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ==================================================== -->
+  <!-- ① FORMULAIRE                                          -->
+  <!-- ==================================================== -->
+  <section class="panel active" id="panel-form">
+    <div class="page-head">
+      <h1>Analyser un planning</h1>
+      <p>Diagnostic qualité DCMA-14 et simulation de risque Monte Carlo sur fichier <code>.mpp</code>.</p>
+    </div>
+
+    <div class="card card-pad">
+      <div class="field">
+        <span class="flabel">Fichier planning</span>
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Déposer un fichier .mpp">
+          <input type="file" id="file" accept=".mpp">
+          <span class="ic">
+            <svg fill="none" stroke-width="2" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+          </span>
+          <div class="t1"><span class="link">Parcourir…</span> ou glisser-déposer</div>
+          <div class="t2">.mpp uniquement · 20 Mo max</div>
+          <div class="fname" id="fname"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="flabel">Analyse à exécuter</span>
+        <div class="choices">
+          <div class="choice">
+            <input type="radio" name="analysis" id="a1" checked>
+            <label for="a1">
+              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Diagnostic qualité DCMA-14</span>
+              <span class="cd">14 contrôles avec cibles et actions recommandées.</span>
+            </label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="analysis" id="a2">
+            <label for="a2">
+              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Simulation Monte Carlo</span>
+              <span class="cd">P50 / P80 / P90, contingence recommandée, criticité des tâches.</span>
+            </label>
+          </div>
+          <div class="choice">
+            <input type="radio" name="analysis" id="a3">
+            <label for="a3">
+              <span class="ct"><span class="tick"><svg fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></span>Les deux</span>
+              <span class="cd">Qualité DCMA puis risque planning.</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <details class="adv">
+        <summary><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg></span> Options avancées Monte Carlo</summary>
+        <div class="adv-body">
+          <div class="grid4">
+            <div>
+              <label for="sims" style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Simulations</label>
+              <input class="in" type="number" id="sims" value="5000" min="100" step="100">
+            </div>
+            <div>
+              <label for="opt" style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Facteur optimiste</label>
+              <input class="in" type="number" id="opt" value="0.8" step="0.05">
+            </div>
+            <div>
+              <label for="pess" style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Facteur pessimiste</label>
+              <input class="in" type="number" id="pess" value="1.5" step="0.05">
+            </div>
+            <div>
+              <label for="csv" style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">CSV d'estimations</label>
+              <input class="in" type="file" id="csv" accept=".csv" style="padding:7px 10px;font-size:12.5px">
+            </div>
+          </div>
+          <div class="hint">Format CSV : <code>task_id,optimistic,most_likely,pessimistic</code></div>
+        </div>
+      </details>
+
+      <button class="btn btn-block" type="submit">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Lancer l'analyse
+      </button>
+
+      <div class="quota"><span class="pulse"></span> 4 analyses restantes aujourd'hui pour votre adresse IP</div>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- ② RESULTAT DCMA-14                                    -->
+  <!-- ==================================================== -->
+  <section class="panel" id="panel-dcma">
+    <div class="result-top">
+      <div class="page-head" style="margin:0">
+        <h1>Diagnostic qualité DCMA-14</h1>
+        <div style="margin-top:10px">
+          <span class="file-chip"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg> RL.mpp</span>
+        </div>
+      </div>
+      <span class="badge b-err" style="font-size:13px;padding:8px 12px"><span class="dot"></span> 2 contrôle(s) à corriger</span>
+    </div>
+
+    <div class="callout c-warn">
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <div><b>Date d'état du projet non renseignée</b> — plusieurs contrôles seront N/A. Renseignez-la pour activer les contrôles 9, 11 et 14.</div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi kpi-total"><div class="kl">Contrôles</div><div class="kv">14</div></div>
+      <div class="kpi kpi-ok"><div class="kl">Conformes</div><div class="kv">7</div></div>
+      <div class="kpi kpi-err"><div class="kl">À corriger</div><div class="kv">2</div></div>
+      <div class="kpi kpi-na"><div class="kl">N/A</div><div class="kv">4</div></div>
+      <div class="kpi kpi-info"><div class="kl">Info</div><div class="kv">1</div></div>
+    </div>
+
+    <div class="callout c-err">
+      <svg class="ci" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>
+      <div>La <b>logique de réseau est le point bloquant</b>. Tant que le contrôle Logic dépasse 5&nbsp;%, le chemin critique, les marges et le Monte Carlo restent peu fiables.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Priorités d'amélioration</h2><span class="meta">3 actions</span></div>
+      <div class="card-pad prio">
+        <div class="prio-item">
+          <div class="prio-num pn-err">01</div>
+          <div class="prio-body">
+            <div class="prio-title">Logic (tâches sans lien amont/aval) <span class="badge b-err">À corriger</span></div>
+            <div class="prio-metric">94,74&nbsp;% (18/19) · <span class="target">cible ≤ 5&nbsp;%</span></div>
+            <div class="prio-action">Relier les 18 tâches à un prédécesseur et un successeur logiques. Sans cela, le chemin critique et le Monte Carlo ne sont pas fiables.</div>
+          </div>
+        </div>
+        <div class="prio-item">
+          <div class="prio-num pn-na">09</div>
+          <div class="prio-body">
+            <div class="prio-title">Dates invalides (vs date d'état) <span class="badge b-na">N/A</span></div>
+            <div class="prio-metric">Non évaluable · <span class="target">cible 0&nbsp;%</span></div>
+            <div class="prio-action">Renseigner la date d'état du projet pour contrôler la cohérence des dates.</div>
+          </div>
+        </div>
+        <div class="prio-item">
+          <div class="prio-num pn-na">14</div>
+          <div class="prio-body">
+            <div class="prio-title">Baseline Execution Index (BEI) <span class="badge b-na">N/A</span></div>
+            <div class="prio-metric">0/0 · <span class="target">cible ≥ 0,95</span></div>
+            <div class="prio-action">Renseigner une baseline et une date d'état pour calculer le BEI.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Détail des contrôles</h2><span class="meta">14 contrôles</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr><th>Contrôle</th><th class="num">Résultat</th><th class="num">Cible</th><th>Verdict</th><th>Action recommandée</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">1.</span>Logic (tâches sans lien amont/aval)</div></td>
+              <td class="num"><div class="val">94,74&nbsp;%</div><div class="val-sub">18/19</div></td>
+              <td class="num target-cell">≤ 5&nbsp;%</td>
+              <td><span class="badge b-err">À corriger</span></td>
+              <td class="act">Relier les 18 tâches à un prédécesseur et un successeur logiques.</td>
+            </tr>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">2.</span>Leads (lag négatif)</div></td>
+              <td class="num"><div class="val">0,0&nbsp;%</div><div class="val-sub">0/0</div></td>
+              <td class="num target-cell">0&nbsp;%</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="act">Aucun lead détecté.</td>
+            </tr>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">3.</span>Lags (lag positif)</div></td>
+              <td class="num"><div class="val">0,0&nbsp;%</div><div class="val-sub">0/0</div></td>
+              <td class="num target-cell">≤ 5&nbsp;%</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="act">Aucun lag positif détecté.</td>
+            </tr>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">4.</span>Relations Finish-to-Start</div></td>
+              <td class="num"><div class="val">0,0&nbsp;%</div><div class="val-sub">0/0</div></td>
+              <td class="num target-cell">≥ 90&nbsp;%</td>
+              <td><span class="badge b-err">À corriger</span></td>
+              <td class="act">Analyser les liens non Finish-to-Start.</td>
+            </tr>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">10.</span>Tâches de détail sans ressource</div></td>
+              <td class="num"><div class="val">100,0&nbsp;%</div><div class="val-sub">19/19</div></td>
+              <td class="num target-cell">Indicatif</td>
+              <td><span class="badge b-info">Info</span></td>
+              <td class="act">Affecter au minimum les ressources aux tâches critiques.</td>
+            </tr>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">13.</span>Critical Path Length Index (CPLI)</div></td>
+              <td class="num"><div class="val">1,0</div><div class="val-sub">34 tâches critiques</div></td>
+              <td class="num target-cell">0,95–1,05</td>
+              <td><span class="badge b-ok">OK</span></td>
+              <td class="act">CPLI cohérent avec un chemin critique réaliste.</td>
+            </tr>
+            <tr>
+              <td><div class="ctrl-name"><span class="idx">14.</span>Baseline Execution Index (BEI)</div></td>
+              <td class="num"><div class="val">N/A</div><div class="val-sub">0/0</div></td>
+              <td class="num target-cell">≥ 0,95</td>
+              <td><span class="badge b-na">N/A</span></td>
+              <td class="act">Renseigner une baseline et une date d'état.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:0 22px 22px">
+        <details class="raw">
+          <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
+          <pre>DIAGNOSTIC DCMA-14 — /tmp/mppweb_2suc66a0/planning.mpp
+Date d'etat du projet : NON RENSEIGNEE
+========================================================================
+1. Logic (taches sans lien amont/aval)   94.74%  18/19   A CORRIGER
+2. Leads (lag negatif)                    0.00%   0/0    OK
+...
+Resume : 2 controle(s) en ecart, 4 non applicable(s), 7 OK.</pre>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================================================== -->
+  <!-- ③ RESULTAT MONTE CARLO                                -->
+  <!-- ==================================================== -->
+  <section class="panel" id="panel-mc">
+    <div class="result-top">
+      <div class="page-head" style="margin:0">
+        <h1>Simulation Monte Carlo</h1>
+        <div style="margin-top:10px">
+          <span class="file-chip"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/></svg> PROJET-X.mpp</span>
+        </div>
+      </div>
+      <span class="badge b-ok" style="font-size:13px;padding:8px 12px"><span class="dot"></span> Simulation exploitable</span>
+    </div>
+
+    <div class="card card-pad" style="display:flex;gap:26px;flex-wrap:wrap;font-size:13px;color:var(--text-2)">
+      <span><b style="color:var(--text);font-variant-numeric:tabular-nums">187</b> tâches de détail</span>
+      <span><b style="color:var(--text);font-variant-numeric:tabular-nums">214</b> liens de dépendance</span>
+      <span><b style="color:var(--text);font-variant-numeric:tabular-nums">5 000</b> simulations</span>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Durées simulées</h2><span class="meta">en jours</span></div>
+      <div class="card-pad">
+        <div class="dur-grid">
+          <div class="dur">
+            <div class="dl">Déterministe (CPM)</div>
+            <div class="dv">187,0<small>j</small></div>
+            <div class="dd">référence, pas un engagement</div>
+          </div>
+          <div class="dur">
+            <div class="dl">P50 — Médiane</div>
+            <div class="dv">191,4<small>j</small></div>
+            <div class="dd">+4,4 j vs CPM</div>
+          </div>
+          <div class="dur is-rec">
+            <span class="rec">Recommandé</span>
+            <div class="dl">P80</div>
+            <div class="dv">204,2<small>j</small></div>
+            <div class="dd">+17,2 j vs CPM</div>
+          </div>
+          <div class="dur">
+            <div class="dl">P90 — Prudent</div>
+            <div class="dv">214,8<small>j</small></div>
+            <div class="dd">+27,8 j vs CPM</div>
+          </div>
+        </div>
+
+        <!-- Échelle visuelle des percentiles -->
+        <div class="scale" aria-hidden="true">
+          <div class="scale-track"></div>
+          <div class="scale-fill" style="width:22%"></div>
+          <div class="scale-mark mk-cpm" style="left:0%"><div class="ml">CPM</div><div class="pin"></div><div class="mv">187</div></div>
+          <div class="scale-mark" style="left:11%"><div class="ml">P50</div><div class="pin"></div><div class="mv">191</div></div>
+          <div class="scale-mark mk-p80" style="left:44%"><div class="ml">P80</div><div class="pin"></div><div class="mv">204</div></div>
+          <div class="scale-mark" style="left:70%"><div class="ml">P90</div><div class="pin"></div><div class="mv">215</div></div>
+        </div>
+
+        <div class="decision">
+          <svg class="di" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9.7 17h4.6M12 3a7 7 0 00-4 12.7c.6.5 1 1.2 1 2V18h6v-.3c0-.8.4-1.5 1-2A7 7 0 0012 3z"/></svg>
+          <div>
+            <div class="dt">Lecture décisionnelle</div>
+            <div class="db">Pour un objectif de planning à <b>80&nbsp;% de confiance</b>, viser <b>204,2 j</b>, soit <b>17,2 j</b> de contingence par rapport à la durée déterministe. Pour un engagement prudent à 90&nbsp;%, viser 214,8 j.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Indice de criticité par tâche</h2><span class="meta">% sur le chemin critique</span></div>
+      <div class="card-pad">
+        <div class="crit">
+          <div class="crit-row">
+            <div class="crit-name" title="Qualification structure — essais statiques">Qualification structure — essais statiques</div>
+            <div class="crit-bar"><div class="crit-fill cf-high" style="width:94%"></div></div>
+            <div class="crit-val cv-high">94&nbsp;%</div>
+          </div>
+          <div class="crit-row">
+            <div class="crit-name" title="Intégration système propulsion">Intégration système propulsion</div>
+            <div class="crit-bar"><div class="crit-fill cf-high" style="width:81%"></div></div>
+            <div class="crit-val cv-high">81&nbsp;%</div>
+          </div>
+          <div class="crit-row">
+            <div class="crit-name" title="Revue de conception critique (CDR)">Revue de conception critique (CDR)</div>
+            <div class="crit-bar"><div class="crit-fill cf-med" style="width:58%"></div></div>
+            <div class="crit-val cv-med">58&nbsp;%</div>
+          </div>
+          <div class="crit-row">
+            <div class="crit-name" title="Livraison sous-ensemble avionique">Livraison sous-ensemble avionique</div>
+            <div class="crit-bar"><div class="crit-fill cf-med" style="width:47%"></div></div>
+            <div class="crit-val cv-med">47&nbsp;%</div>
+          </div>
+          <div class="crit-row">
+            <div class="crit-name" title="Essais environnementaux">Essais environnementaux</div>
+            <div class="crit-bar"><div class="crit-fill cf-low" style="width:22%"></div></div>
+            <div class="crit-val cv-low">22&nbsp;%</div>
+          </div>
+        </div>
+        <div class="crit-note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 8v4m0 4h.01"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/></svg>
+          Surveiller en priorité les tâches au-delà de 70&nbsp;% de criticité.
+        </div>
+      </div>
+    </div>
+
+    <details class="raw">
+      <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg> Sortie brute</summary>
+      <pre>SIMULATION MONTE CARLO — /tmp/mppweb_x/planning.mpp
+Taches de detail : 187
+Liens de dependance : 214
+Simulations : 5000
+Duree deterministe : 187.0 j
+P50 : 191.4 j  P80 : 204.2 j  P90 : 214.8 j</pre>
+    </details>
+  </section>
+
+</main>
+
+<script>
+  // Navigation par onglets (démo) — en production Flask, ce sont des pages distinctes
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.setAttribute('aria-selected','false'));
+      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+      t.setAttribute('aria-selected','true');
+      document.getElementById('panel-'+t.dataset.t).classList.add('active');
+    });
+  });
+
+  // Drag & drop
+  const drop=document.getElementById('drop'),file=document.getElementById('file'),fname=document.getElementById('fname');
+  ['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('drag')}));
+  ['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('drag')}));
+  drop.addEventListener('drop',ev=>{ if(ev.dataTransfer.files.length){file.files=ev.dataTransfer.files;showFile()} });
+  file.addEventListener('change',showFile);
+  function showFile(){ if(file.files.length){fname.textContent=file.files[0].name;drop.classList.add('hasfile')} }
+</script>
+</body>
+</html>

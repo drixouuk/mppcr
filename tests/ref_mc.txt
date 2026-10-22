@@ -1,0 +1,22 @@
+========================================================================
+SIMULATION MONTE CARLO — test_projet.xml
+========================================================================
+Taches de detail : 7
+Liens de dependance : 5
+Taches gelees (achevees ou externes) : 1 -- duree connue, aucune incertitude simulee
+Simulations : 500
+
+Duree deterministe (chemin critique, durees planifiees) : 47.0 j
+P50 (mediane simulee)  : 48.5 j  (+1.5 j vs planifie)
+P80                    : 51.0 j  (+4.0 j vs planifie)
+P90                    : 52.3 j  (+5.3 j vs planifie)
+
+Indice de criticite par tache (top 10 -- % de simulations sur le chemin critique) :
+  Analyse des besoins         100.0%
+  Conception détaillée        100.0%
+  Développement               100.0%
+  Tests unitaires             100.0%
+  Recette utilisateur         100.0%
+  Jalon — fin de projet       100.0%
+  Tâche orpheline sans lien     0.0%
+

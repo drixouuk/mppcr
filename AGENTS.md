@@ -17,12 +17,17 @@ Documentation de référence : [`README.md`](README.md) (contrôles, score, mém
 | `Dockerfile` | `python:3.11-slim` + JRE headless (MPXJ/JPype) + Gunicorn 2 workers gthread × 4 threads |
 | `docker-compose.yml` / `docker-compose.prod.yml` | Build local / image GHCR **épinglée** (jamais `:latest`) |
 | `.github/workflows/docker-publish.yml` | Build amd64 + arm64, smoke test, push GHCR, release sur tag `v*` |
+| `tests/` | Harnais de vérification et outils de diagnostic (`check_mppcr.py`, `alignment_check.py`, `verify_prod.sh`, mesures mémoire, références `ref_dcma.txt` / `ref_mc.txt`, aperçus HTML) |
+| `tests/.mppcr-deps/` | Dépendances du harnais montées en `PYTHONPATH` par `lancer_lxc.sh` — **ignoré**, régénérer par `pip install --target tests/.mppcr-deps pyyaml xlsxwriter` |
+| `docs/maquettes/` | Maquettes de l'interface : `mppcr-redesign.html` (v2, source **verbatim** de la CSS de `base.html`), `maquette_mpp.html` (v1) |
+| `docs/reference/` | Documentation tierce sous droits (Deltek DCMA-14) — **local uniquement**, ignoré |
+| `.staging-ancien/` | Ancien staging rapatrié de `homelab/` (clones, bundles) — ignoré, entièrement présent dans l'historique git : supprimable |
 
 ## Commandes
 
 - Lancer en local : `docker compose up --build` → <http://localhost:5000> (hors conteneur il faut Java + `pip install -r requirements.txt`, et `USAGE_DB_PATH` pour le compteur).
 - Production : `docker compose -f docker-compose.prod.yml up -d` sur le CT 121 (`docker.lan`, `192.168.1.87`, clé `~/.ssh/docker_lxc`).
-- Tests : le harnais vit **hors du dépôt**, dans `~/myprojects/homelab/.mppcr-check/` (`check_mppcr.py`, `alignment_check.py`, `verify_prod.sh`, références `ref_dcma.txt` / `ref_mc.txt`). Il tourne **dans l'image de production** via `lancer_lxc.sh`, qui copie par défaut le code de `homelab/.mppcr-staging/` : pour tester ce clone, `STAGE=~/myprojects/mppcr ./lancer_lxc.sh "python3 check_mppcr.py"`.
+- Tests : le harnais tourne **dans l'image de production** (seule à embarquer Java + MPXJ) : `tests/lancer_lxc.sh` copie le code du dépôt et le harnais dans le conteneur `mpp` du CT 121, puis exécute la commande — `tests/lancer_lxc.sh "python3 check_mppcr.py"`, `tests/lancer_lxc.sh "python3 alignment_check.py templates mppcr-redesign.html"` (copier la maquette au besoin). `STAGE=<dossier>` pour tester un autre code.
 
 ## Publier une version
 
@@ -38,4 +43,5 @@ Documentation de référence : [`README.md`](README.md) (contrôles, score, mém
 - Le **smoke test CI** fait des `grep` sur le HTML (libellés, `id`, classes) : modifier un template impose de vérifier `docker-publish.yml`.
 - Derrière un reverse proxy : `X-Forwarded-For` obligatoire (`ProxyFix x_for=1`) sinon le quota par IP compte le proxy ; `proxy_read_timeout` ≥ 700 s.
 - **Jamais commité** : `*.mpp`, `*.mspdi`, `*.csv` (plannings clients), `.env*`.
-- État git au 22/10/2026 : `main` = v1.13.0 ; branche `origin/dev/montecarlo-macro` (3 commits d'avance, répartition du risque par lot) = contenu actuel de `homelab/.mppcr-staging/` (`VERSION` `v1.14.0-dev`).
+- `.gitignore` exclut `*.mpp` : seul `tests/planning_ci.mpp` (synthétique) est réintégré par une exception.
+- État git au 22/10/2026 : `main` = v1.13.0 ; branche `origin/dev/montecarlo-macro` (3 commits d'avance, répartition du risque par lot, `VERSION` `v1.14.0-dev`).
