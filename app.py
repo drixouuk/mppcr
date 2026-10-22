@@ -1338,12 +1338,19 @@ def parse_montecarlo_output(text, macro_level=None):
         "macro_message": "",
         "macro_recap_links": 0,
         "macro_recap_examples": [],
+        # v1.15 : options --sensibilite, --histogramme, --prevision, --correlation.
+        "sensitivity": [],
+        "distribution": [],
+        "forecast": None,
+        "correlation": None,
+        "charts": None,
     }
 
     stop_mode = False
     stop_lines = []
     in_criticality = False
     in_macro = False
+    section = None
 
     for line in text.splitlines():
         stripped = line.strip()
@@ -1376,7 +1383,10 @@ def parse_montecarlo_output(text, macro_level=None):
             parsed["info"]["sims"] = stripped.split(":", 1)[1].strip()
             continue
 
-        if stripped.startswith("Duree deterministe") or stripped.startswith(("P50", "P80", "P90")):
+        # Les percentiles globaux précèdent les sections facultatives : la section
+        # « Prévision » contient aussi des lignes « P50 : … », à ne pas confondre.
+        if section is None and (stripped.startswith("Duree deterministe")
+                                or stripped.startswith(("P50", "P80", "P90"))):
             if ":" in stripped:
                 raw_label, value = stripped.split(":", 1)
                 raw_label = raw_label.strip()
@@ -1407,7 +1417,58 @@ def parse_montecarlo_output(text, macro_level=None):
             in_criticality = True
             continue
 
+        if stripped.startswith("Correlation intra-lot :"):
+            parsed["correlation"] = first_float(stripped.split(":", 1)[1])
+            continue
+
+        # Sections facultatives produites après la criticité : chacune clôt la
+        # précédente (leurs lignes finissent aussi par des nombres).
+        if stripped.startswith("Sensibilite (correlation"):
+            in_criticality, section = False, "sensibilite"
+            continue
+        if stripped.startswith("Distribution de la duree simulee"):
+            in_criticality, section = False, "distribution"
+            continue
+        if stripped.startswith("Prevision depuis la date d'etat"):
+            in_criticality, section = False, "prevision"
+            date_etat = re.search(r"\((\d{4}-\d{2}-\d{2})\)", stripped)
+            parsed["forecast"] = {
+                "status_date": date_etat.group(1) if date_etat else None,
+                "rows": [],
+                "message": "" if date_etat else stripped,
+            }
+            continue
+
+        if section == "sensibilite" and not stripped.startswith("Repartition"):
+            ligne = re.match(r"^(.+?)\s+([+-][0-9.]+)$", stripped)
+            if ligne:
+                valeur = float(ligne.group(2))
+                parsed["sensitivity"].append({
+                    "name": ligne.group(1).strip(),
+                    "value": valeur,
+                    "width": round(min(abs(valeur), 1.0) * 100, 1),
+                })
+            continue
+        if section == "distribution" and not stripped.startswith("Repartition"):
+            ligne = re.match(r"^([0-9.]+) - ([0-9.]+) : (\d+)$", stripped)
+            if ligne:
+                parsed["distribution"].append(
+                    (float(ligne.group(1)), float(ligne.group(2)), int(ligne.group(3))))
+            continue
+        if section == "prevision" and not stripped.startswith("Repartition"):
+            ligne = re.match(r"^(Reste a faire planifie|P50|P80|P90) : ([0-9.]+) j -> fin (\S+)$",
+                             stripped)
+            if ligne and parsed["forecast"] is not None:
+                parsed["forecast"]["rows"].append({
+                    "key": "plan" if ligne.group(1).startswith("Reste") else ligne.group(1).lower(),
+                    "days": float(ligne.group(2)),
+                    "date": ligne.group(3),
+                    "date_fr": "/".join(reversed(ligne.group(3).split("-"))),
+                })
+            continue
+
         if stripped.startswith("Repartition par macro-tache (niveau"):
+            section = None
             # Section produite par `montecarlo.py --macro-level N` : elle suit le
             # bloc de criticité et ses lignes finissent elles aussi par un
             # pourcentage. On entre donc en mode « macro » pour ne pas les prendre
@@ -1475,7 +1536,115 @@ def parse_montecarlo_output(text, macro_level=None):
         parsed["stop_message"] = "\n".join(stop_lines)
 
     enrich_montecarlo(parsed)
+    parsed["charts"] = graphiques_distribution(parsed)
     return parsed
+
+
+# Géométrie des graphiques de distribution (SVG rendu côté serveur, sans
+# JavaScript) : histogramme des durées simulées et courbe en S (part cumulée des
+# tirages). Deux graphiques séparés plutôt qu'un double axe : effectifs et
+# pourcentage cumulé n'ont pas la même échelle.
+CHART_W, CHART_H = 600, 220
+CHART_MARGE = {"g": 44, "d": 12, "h": 14, "b": 30}
+
+
+def _barre_arrondie(x, y, largeur, hauteur, rayon=4.0):
+    """Chemin d'une colonne à extrémité arrondie (4 px), base carrée."""
+    rayon = min(rayon, largeur / 2, hauteur)
+    if hauteur <= 0:
+        return ""
+    bas = y + hauteur
+    return (f"M{x:.1f},{bas:.1f}V{y + rayon:.1f}Q{x:.1f},{y:.1f} {x + rayon:.1f},{y:.1f}"
+            f"H{x + largeur - rayon:.1f}Q{x + largeur:.1f},{y:.1f} {x + largeur:.1f},{y + rayon:.1f}"
+            f"V{bas:.1f}Z")
+
+
+def _graduations(debut, fin, nombre=5):
+    """Graduations « rondes » entre debut et fin."""
+    etendue = max(fin - debut, 1e-9)
+    brut = etendue / max(nombre - 1, 1)
+    puissance = 10 ** math.floor(math.log10(brut))
+    pas = next(m * puissance for m in (1, 2, 2.5, 5, 10) if m * puissance >= brut)
+    premier = math.ceil(debut / pas) * pas
+    valeurs = []
+    v = premier
+    while v <= fin + 1e-9:
+        valeurs.append(round(v, 6))
+        v += pas
+    return valeurs
+
+
+def graphiques_distribution(parsed):
+    classes = parsed.get("distribution") or []
+    total = sum(c[2] for c in classes)
+    if len(classes) < 2 or total == 0:
+        return None
+    g, d, h, b = (CHART_MARGE[k] for k in ("g", "d", "h", "b"))
+    largeur, hauteur = CHART_W - g - d, CHART_H - h - b
+    x_min, x_max = classes[0][0], classes[-1][1]
+
+    def x_de(valeur):
+        return g + (valeur - x_min) / (x_max - x_min) * largeur
+
+    effectif_max = max(c[2] for c in classes)
+    y_ticks = _graduations(0, effectif_max, 4)
+    haut = max(y_ticks[-1], effectif_max)
+
+    def y_eff(valeur):
+        return h + hauteur - valeur / haut * hauteur
+
+    pas = largeur / len(classes)
+    epaisseur = min(24.0, pas - 2.0)
+    barres = []
+    cumul = 0
+    points = [(x_de(x_min), h + hauteur)]
+    for debut, fin, effectif in classes:
+        cumul += effectif
+        x = x_de(debut) + (pas - epaisseur) / 2
+        y = y_eff(effectif)
+        barres.append({
+            "d": _barre_arrondie(x, y, epaisseur, h + hauteur - y),
+            "hit_x": round(x_de(debut), 1), "hit_w": round(pas, 1),
+            "title": (f"{nombre_fr(debut)} – {nombre_fr(fin)} j : {effectif} tirage"
+                      f"{'s' if effectif > 1 else ''} ({nombre_fr(100 * effectif / total)} %)"),
+        })
+        points.append((x_de(fin), h + hauteur - cumul / total * hauteur))
+
+    x_ticks = [{"x": round(x_de(v), 1), "label": nombre_fr(v, 0)}
+               for v in _graduations(x_min, x_max, 6) if x_min <= v <= x_max]
+    reperes = []
+    metriques = {m["key"]: m.get("value_num") for m in parsed.get("metrics") or []}
+    for cle in ("p50", "p80", "p90"):
+        valeur = metriques.get(cle)
+        if valeur is not None and x_min <= valeur <= x_max:
+            reperes.append({"x": round(x_de(valeur), 1), "label": cle.upper(),
+                            "value": nombre_fr(valeur)})
+
+    ligne = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in points)
+    aire = ligne + f" L{points[-1][0]:.1f},{h + hauteur:.1f} Z"
+    p80 = metriques.get("p80")
+    point_p80 = None
+    if p80 is not None and x_min <= p80 <= x_max:
+        point_p80 = {"x": round(x_de(p80), 1), "y": round(h + hauteur - 0.8 * hauteur, 1),
+                     "label": f"P80 : {nombre_fr(p80)} j"}
+    return {
+        "w": CHART_W, "h": CHART_H, "g": g, "base": h + hauteur, "haut": h, "droite": g + largeur,
+        "barres": barres,
+        "y_ticks": [{"y": round(y_eff(v), 1), "label": str(int(v))} for v in y_ticks],
+        "x_ticks": x_ticks,
+        "reperes": reperes,
+        "courbe": ligne, "aire": aire,
+        "points": [{"x": round(x, 1), "y": round(y, 1),
+                    "title": f"{nombre_fr(classes[i - 1][1])} j : {nombre_fr(100 * (h + hauteur - y) / hauteur, 0)} % des tirages"}
+                   for i, (x, y) in enumerate(points) if i > 0],
+        "pct_ticks": [{"y": round(h + hauteur - f * hauteur, 1), "label": f"{int(f * 100)} %"}
+                      for f in (0, 0.5, 1)],
+        "p80": point_p80,
+        "total": total,
+        "table": [{"de": nombre_fr(c[0]), "a": nombre_fr(c[1]), "n": c[2],
+                   "cumul": nombre_fr(100 * sum(x[2] for x in classes[:i + 1]) / total)}
+                  for i, c in enumerate(classes)],
+    }
 
 
 # Bornes des options Monte Carlo acceptées par le serveur : le formulaire propose
@@ -1541,6 +1710,20 @@ def parse_montecarlo_options(form):
 
 
 NIVEAUX_MACRO = (1, 2, 3)
+
+# Corrélation des durées entre tâches d'un même lot : choix fermés du formulaire.
+CORRELATIONS = {"": 0.0, "0": 0.0, "0.3": 0.3, "0.6": 0.6}
+
+
+def niveau_correlation(form):
+    """Corrélation intra-lot choisie (0, 0,3 ou 0,6)."""
+    brut = (form.get("correlation") or "").strip().replace(",", ".")
+    if brut not in CORRELATIONS:
+        raise ValueError("La corrélation entre tâches doit valoir 0, 0,3 ou 0,6.")
+    return CORRELATIONS[brut]
+
+# Classes de l'histogramme des durées simulées.
+CLASSES_HISTOGRAMME = 20
 
 
 def niveau_macro(form):
@@ -1798,6 +1981,33 @@ def macro_export_rows(parsed):
     return rows
 
 
+def sections_v115(parsed):
+    """Sections d'export : prévision depuis la date d'état, sensibilité et
+    distribution des durées simulées -> [(titre, colonnes, lignes)]."""
+    sections = []
+    prevision = parsed.get("forecast") or {}
+    if prevision.get("rows"):
+        libelles = {"plan": "Reste à faire planifié", "p50": "P50", "p80": "P80", "p90": "P90"}
+        sections.append((
+            f"Prévision depuis la date d'état ({prevision.get('status_date')})",
+            ["Indicateur", "Reste à faire (j)", "Fin prévisionnelle"],
+            [[libelles.get(r["key"], r["key"]), r["days"], r["date"]] for r in prevision["rows"]],
+        ))
+    if parsed.get("sensitivity"):
+        sections.append((
+            "Sensibilité (corrélation durée de tâche / fin de projet)",
+            ["Tâche", "Corrélation"],
+            [[s["name"], s["value"]] for s in parsed["sensitivity"]],
+        ))
+    if parsed.get("distribution"):
+        sections.append((
+            "Distribution de la durée simulée",
+            ["De (j)", "À (j)", "Tirages"],
+            [[debut, fin, effectif] for debut, fin, effectif in parsed["distribution"]],
+        ))
+    return sections
+
+
 def dispersion_export_line(parsed):
     """Indicateur de dispersion P50 → P90 déjà calculé par enrich_montecarlo()."""
     for kpi in parsed.get("kpi") or []:
@@ -1933,6 +2143,12 @@ def csv_export_payload(results, filename):
             writer.writerow(["Tâche", "Criticité (%)", "Lecture"])
             for item in montecarlo["criticality"]:
                 writer.writerow([item["name"], item["pct"], item["level"]])
+
+        for titre, colonnes, lignes in sections_v115(montecarlo):
+            writer.writerow([])
+            writer.writerow([f"# {titre.upper()}"])
+            writer.writerow(colonnes)
+            writer.writerows(lignes)
 
         if montecarlo.get("macro_level"):
             writer.writerow([])
@@ -2142,6 +2358,18 @@ def xlsx_export_payload(results, filename):
                 sheet.write(row, 2, item["level"])
                 row += 1
 
+        for titre_section, colonnes, lignes in sections_v115(montecarlo):
+            row += 2
+            sheet.write(row, 0, titre_section, titre)
+            row += 1
+            for column, label in enumerate(colonnes):
+                sheet.write(row, column, label, entete)
+            row += 1
+            for ligne in lignes:
+                for column, valeur in enumerate(ligne):
+                    sheet.write(row, column, valeur)
+                row += 1
+
         if montecarlo.get("macro_level"):
             row += 2
             sheet.write(row, 0, f"Répartition du risque par lot (niveau {montecarlo['macro_level']})",
@@ -2288,11 +2516,13 @@ def analyse():
 
     include_montecarlo = analysis in {"montecarlo", "both"}
     sims = opt = pess = macro_level = None
+    correlation = 0.0
 
     if include_montecarlo:
         try:
             sims, opt, pess = parse_montecarlo_options(request.form)
             macro_level = niveau_macro(request.form)
+            correlation = niveau_correlation(request.form)
         except ValueError as exc:
             return render_template("error.html", message=str(exc)), 400
 
@@ -2386,6 +2616,14 @@ def analyse():
                 # simule toujours au niveau détail, seule la restitution change.
                 if macro_level is not None:
                     cmd.extend(["--macro-level", str(macro_level)])
+
+                # Sensibilité (tornado), distribution (histogramme et courbe en S)
+                # et prévision depuis la date d'état : toujours demandées, le
+                # moteur vectorisé les rend peu coûteuses.
+                cmd.extend(["--sensibilite", "--histogramme", str(CLASSES_HISTOGRAMME),
+                            "--prevision"])
+                if correlation:
+                    cmd.extend(["--correlation", str(correlation)])
 
                 stdout = run_script(cmd, "la simulation Monte Carlo", token=client_token)
                 quota_counted = count_analysis(ip, quota_counted)

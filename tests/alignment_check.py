@@ -28,6 +28,10 @@ MOCKUP = Path(sys.argv[2] if len(sys.argv) > 2 else "mppcr-redesign.html")
 ADDED = {
     "overlay", "overlay-card", "overlay-spin", "overlay-title", "overlay-step",
     "is-empty",
+    # v1.15 : graphiques de distribution rendus côté serveur (SVG).
+    "charts-grid", "chart-card", "chart", "chart-grid", "chart-axis", "chart-bar",
+    "chart-col", "chart-hit", "chart-mark", "chart-line", "chart-area", "chart-dot",
+    "chart-pt", "chart-table",
 }
 
 FAILS, COUNT = [], [0]

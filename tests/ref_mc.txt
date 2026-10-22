@@ -8,8 +8,8 @@ Simulations : 500
 
 Duree deterministe (chemin critique, durees planifiees) : 47.0 j
 P50 (mediane simulee)  : 48.5 j  (+1.5 j vs planifie)
-P80                    : 51.0 j  (+4.0 j vs planifie)
-P90                    : 52.3 j  (+5.3 j vs planifie)
+P80                    : 51.2 j  (+4.2 j vs planifie)
+P90                    : 52.6 j  (+5.6 j vs planifie)
 
 Indice de criticite par tache (top 10 -- % de simulations sur le chemin critique) :
   Analyse des besoins         100.0%

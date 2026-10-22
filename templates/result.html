@@ -440,6 +440,120 @@
       {% endif %}
     {% endif %}
 
+    {# v1.15 : prévision depuis la date d'état (reste à faire et dates de fin),
+       sensibilité (tornado) et distribution des durées simulées. Composants de
+       la maquette (cartes de durée, barres de criticité) ; seuls les deux
+       graphiques SVG sont des ajouts du rendu serveur. #}
+    {% if exploitable and p.forecast %}
+      <div class="sec-title">
+        <h2>Fin prévisionnelle</h2>
+        {% if p.forecast.status_date %}<span class="count">depuis la date d’état du {{ p.forecast.status_date[8:10] }}/{{ p.forecast.status_date[5:7] }}/{{ p.forecast.status_date[0:4] }}</span>{% endif %}
+        <span class="right small muted">Reste à faire simulé, calendrier du projet</span>
+      </div>
+      {% if p.forecast.rows %}
+        <div class="mc-durations">
+          {% for r in p.forecast.rows %}
+            <div class="dur-card{{ ' ref' if r.key == 'plan' else '' }}{{ ' reco' if r.key == 'p80' else '' }}">
+              <div class="d-label">
+                {%- if r.key == 'plan' %}Planifié (reste à faire)
+                {%- elif r.key == 'p50' %}P50 — Médiane
+                {%- elif r.key == 'p80' %}P80 — Objectif planning
+                {%- else %}P90 — Prudent{% endif -%}
+              </div>
+              <div class="d-val"{% if r.key == 'p80' %} style="color:var(--ok)"{% endif %}>{{ r.date_fr }}</div>
+              <div class="d-delta d-ref">{{ '%.1f'|format(r.days)|replace('.', ',') }} j ouvrés restants</div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="alert alert-info">
+          <svg class="a-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span><b>Prévision indisponible</b> — le planning n’a pas de date d’état : renseignez-la pour obtenir le reste à faire et les dates de fin.</span>
+        </div>
+      {% endif %}
+    {% endif %}
+
+    {% if exploitable and p.charts %}
+      {% set c = p.charts %}
+      <div class="sec-title">
+        <h2>Distribution des durées simulées</h2>
+        <span class="count">{{ c.total }} tirages</span>
+        {% if p.correlation %}<span class="right small muted">Corrélation intra-lot : {{ '%.1f'|format(p.correlation)|replace('.', ',') }}</span>{% endif %}
+      </div>
+      <div class="charts-grid">
+        <div class="card chart-card">
+          <h3>Histogramme</h3>
+          <p class="small muted">Nombre de tirages par classe de durée, repères P50 · P80 · P90</p>
+          <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Histogramme des durées simulées">
+            <g class="chart-grid">{% for y in c.y_ticks %}<line x1="{{ c.g }}" x2="{{ c.droite }}" y1="{{ y.y }}" y2="{{ y.y }}"/>{% endfor %}</g>
+            {% for b in c.barres %}
+              <g class="chart-col"><title>{{ b.title }}</title>
+                <rect class="chart-hit" x="{{ b.hit_x }}" y="{{ c.haut }}" width="{{ b.hit_w }}" height="{{ c.base - c.haut }}"/>
+                <path class="chart-bar" d="{{ b.d }}"/>
+              </g>
+            {% endfor %}
+            {% for m in c.reperes %}
+              <g class="chart-mark"><line x1="{{ m.x }}" x2="{{ m.x }}" y1="{{ c.haut }}" y2="{{ c.base }}"/>
+                <text x="{{ m.x + 4 }}" y="{{ c.haut + 10 + loop.index0 * 13 }}">{{ m.label }}</text></g>
+            {% endfor %}
+            <g class="chart-axis">
+              <line x1="{{ c.g }}" x2="{{ c.droite }}" y1="{{ c.base }}" y2="{{ c.base }}"/>
+              {% for y in c.y_ticks %}<text x="{{ c.g - 6 }}" y="{{ y.y + 4 }}" text-anchor="end">{{ y.label }}</text>{% endfor %}
+              {% for x in c.x_ticks %}<text x="{{ x.x }}" y="{{ c.base + 18 }}" text-anchor="middle">{{ x.label }}</text>{% endfor %}
+            </g>
+          </svg>
+        </div>
+        <div class="card chart-card">
+          <h3>Courbe en S</h3>
+          <p class="small muted">Part des tirages terminés avant chaque durée (jours)</p>
+          <svg class="chart" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="Courbe en S des durées simulées">
+            <g class="chart-grid">{% for y in c.pct_ticks %}<line x1="{{ c.g }}" x2="{{ c.droite }}" y1="{{ y.y }}" y2="{{ y.y }}"/>{% endfor %}</g>
+            <path class="chart-area" d="{{ c.aire }}"/>
+            <path class="chart-line" d="{{ c.courbe }}"/>
+            {% for pt in c.points %}<circle class="chart-pt" cx="{{ pt.x }}" cy="{{ pt.y }}" r="6"><title>{{ pt.title }}</title></circle>{% endfor %}
+            {% if c.p80 %}
+              <g class="chart-mark"><line x1="{{ c.p80.x }}" x2="{{ c.p80.x }}" y1="{{ c.p80.y }}" y2="{{ c.base }}"/>
+                <text x="{{ c.p80.x - 8 }}" y="{{ c.p80.y - 8 }}" text-anchor="end">{{ c.p80.label }}</text></g>
+              <circle class="chart-dot" cx="{{ c.p80.x }}" cy="{{ c.p80.y }}" r="4"/>
+            {% endif %}
+            <g class="chart-axis">
+              <line x1="{{ c.g }}" x2="{{ c.droite }}" y1="{{ c.base }}" y2="{{ c.base }}"/>
+              {% for y in c.pct_ticks %}<text x="{{ c.g - 6 }}" y="{{ y.y + 4 }}" text-anchor="end">{{ y.label }}</text>{% endfor %}
+              {% for x in c.x_ticks %}<text x="{{ x.x }}" y="{{ c.base + 18 }}" text-anchor="middle">{{ x.label }}</text>{% endfor %}
+            </g>
+          </svg>
+        </div>
+      </div>
+      <details class="opt" style="margin-top:10px">
+        <summary>Valeurs de la distribution (tableau)</summary>
+        <div class="opt-body">
+          <table class="chart-table">
+            <thead><tr><th>Durée (j)</th><th>Tirages</th><th>Cumul</th></tr></thead>
+            <tbody>
+              {% for l in c.table %}<tr><td>{{ l.de }} – {{ l.a }}</td><td>{{ l.n }}</td><td>{{ l.cumul }} %</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endif %}
+
+    {% if exploitable and p.sensitivity %}
+      <div class="sec-title"><h2>Sensibilité des tâches</h2><span class="count">corrélation durée / fin de projet</span></div>
+      <div class="card crit-list">
+        {% for s in p.sensitivity %}
+          <div class="crit-row">
+            <span class="crit-id" title="{{ s.name }}">{{ s.name }}</span>
+            <div class="crit-bar"><div class="crit-fill{{ ' hot' if s.value >= 0.5 }}" style="width:{{ s.width }}%"></div></div>
+            <span class="crit-val">{{ '%+.2f'|format(s.value)|replace('.', ',') }}</span>
+          </div>
+        {% endfor %}
+        <div class="crit-note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          Les tâches en tête pèsent le plus sur la date de fin : c’est là qu’une estimation affinée ou un plan de réduction du risque rapporte le plus.
+        </div>
+      </div>
+    {% endif %}
+
     {# Répartition facultative du risque par lot WBS (`--macro-level N`) : la
        maquette v2 ne prévoit pas ce tableau (l'option n'existait pas dans son
        périmètre), il réutilise donc ses composants — titres de section et

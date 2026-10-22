@@ -1357,6 +1357,58 @@ check("quota : journée comptée dans le fuseau de l'application (Europe/Paris p
 
 
 # --------------------------------------------------------------------------
+section("v1.15 : moteur vectorisé, prévision, sensibilité, distribution, corrélation")
+
+if (STAGE / "test_projet.xml").exists():
+    _brut = app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "montecarlo.py"), "test_projet.xml", "--sims", "2000",
+         "--sensibilite", "--histogramme", "20", "--prevision"],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=600).stdout or "")
+    _mc15 = app.parse_montecarlo_output(_brut)
+    _glob = {m["key"]: m["value_num"] for m in _mc15["metrics"]}
+    check("percentiles globaux non confondus avec ceux de la prévision",
+          len(_mc15["metrics"]) == 4 and _glob.get("deterministic") == 47.0, f"={_glob}")
+    _prev = (_mc15.get("forecast") or {}).get("rows") or []
+    check("prévision : reste à faire et 3 percentiles datés depuis la date d'état",
+          [r["key"] for r in _prev] == ["plan", "p50", "p80", "p90"]
+          and _mc15["forecast"]["status_date"] == "2026-10-05"
+          and _prev[0]["date"] == "2026-11-24", f"={_prev}")
+    check("prévision : dates croissantes P50 <= P80 <= P90",
+          [r["date"] for r in _prev[1:]] == sorted(r["date"] for r in _prev[1:]))
+    check("sensibilité : la tâche la plus longue et incertaine en tête",
+          bool(_mc15["sensitivity"]) and _mc15["sensitivity"][0]["name"] == "Développement",
+          f"={_mc15['sensitivity'][:2]}")
+    check("distribution : 20 classes couvrant tous les tirages",
+          len(_mc15["distribution"]) == 20 and sum(c[2] for c in _mc15["distribution"]) == 2000)
+    check("graphiques : histogramme et courbe en S calculés",
+          _mc15["charts"] is not None and len(_mc15["charts"]["barres"]) == 20
+          and _mc15["charts"]["courbe"].startswith("M"))
+    _corr = app.parse_montecarlo_output(app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "montecarlo.py"), "test_projet.xml", "--sims", "2000",
+         "--correlation", "0.6"], cwd=str(STAGE), capture_output=True, text=True, timeout=600).stdout or ""))
+    _ecart = lambda m: {x["key"]: x["value_num"] for x in m["metrics"]}
+    check("corrélation intra-lot : annoncée et dispersion P50 → P90 élargie",
+          _corr["correlation"] == 0.6
+          and (_ecart(_corr)["p90"] - _ecart(_corr)["p50"]) > (_glob["p90"] - _glob["p50"]),
+          f"corr={_corr['correlation']} {_ecart(_corr)} vs {_glob}")
+    _sans_option = app.LOG4J_NOISE.sub("", subprocess.run(
+        [sys.executable, str(STAGE / "montecarlo.py"), "test_projet.xml", "--sims", "200"],
+        cwd=str(STAGE), capture_output=True, text=True, timeout=600).stdout or "")
+    check("options facultatives absentes de la sortie par défaut",
+          not any(s in _sans_option for s in ("Sensibilite", "Distribution", "Prevision", "Correlation")))
+
+for _v, _attendu in (("", 0.0), ("0.3", 0.3), ("0,6", 0.6)):
+    check(f"formulaire : corrélation « {_v} » lue", app.niveau_correlation({"correlation": _v}) == _attendu)
+try:
+    app.niveau_correlation({"correlation": "0.95"})
+    check("formulaire : corrélation hors liste refusée", False)
+except ValueError:
+    check("formulaire : corrélation hors liste refusée", True)
+_form15 = client.get("/").get_data(as_text=True)
+check("formulaire : choix de la corrélation intra-lot", 'name="correlation"' in _form15)
+
+
+# --------------------------------------------------------------------------
 section("Non-régression : sortie par défaut de dcma14.py et montecarlo.py")
 import hashlib  # noqa: E402
 check("dcma14.py : sortie par défaut inchangée malgré l'option --details",

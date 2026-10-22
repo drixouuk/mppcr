@@ -64,6 +64,7 @@ mpxj.startJVM()
 UniversalProjectReader = jpype.JClass("org.mpxj.reader.UniversalProjectReader")
 TimeUnit = jpype.JClass("org.mpxj.TimeUnit")
 RelationType = jpype.JClass("org.mpxj.RelationType")
+Duration = jpype.JClass("org.mpxj.Duration")
 
 # Calendrier du projet, renseigne a la lecture : il ramene les durees en jours
 # ouvres (voir duration_days).
@@ -289,12 +290,41 @@ def build_macro_groups(proj, level):
     return groupes
 
 
-def build_graph(proj, opt_factor, pess_factor, estimates):
+def est_achevee(t):
+    try:
+        avancement = t.getPercentageComplete()
+        return avancement is not None and float(avancement) >= 100.0
+    except Exception:
+        return False
+
+
+def duree_restante(t):
+    """Duree restante d'une tache (jours ouvres) : 0 si achevee, duree restante
+    MPXJ si elle est commencee, duree planifiee sinon."""
+    if est_achevee(t):
+        return 0.0
+    try:
+        reste = t.getRemainingDuration()
+        if reste is not None:
+            return duration_days(reste)
+    except Exception:
+        pass
+    return duration_days(t.getDuration())
+
+
+def build_graph(proj, opt_factor, pess_factor, estimates, reste_a_faire=False):
     """Construit le graphe de dependances. Chaque noeud porte ses 3 parametres
     PERT (o, m, p) en jours. Les jalons (duree 0) restent a 0 dans toutes les
     branches de l'estimation (pas de risque de duree propre a simuler), et les
     taches gelees (achevees ou externes) gardent o = m = p : aucune incertitude
     ne leur est attribuee. Rend (graphe, nombre de liens, nombre de taches gelees).
+
+    `reste_a_faire` : reseau du travail RESTANT, date 0 = date d'etat. Une tache
+    achevee vaut 0 j et ses liens aval sont retires (son successeur n'attend plus
+    rien) ; une tache commencee ne porte que sa duree restante, incertitude
+    comprise ; une estimation 3 points s'applique a la tache entiere et n'est donc
+    pas reprise pour une tache deja commencee. Toute tache peut demarrer des la
+    date d'etat : les dates reelles passees ne sont pas rejouees.
     """
     G = nx.DiGraph()
     tasks = {int(t.getUniqueID()): t for t in proj.getTasks()
@@ -303,6 +333,14 @@ def build_graph(proj, opt_factor, pess_factor, estimates):
     gelees = 0
     for uid, t in tasks.items():
         m = duration_days(t.getDuration())
+        if reste_a_faire:
+            entiere = m
+            m = duree_restante(t)
+            if est_achevee(t):
+                G.add_node(uid, name=str(t.getName()), o=0.0, m=0.0, p=0.0)
+                continue
+            if m < entiere and uid in estimates:
+                estimates = {k: v for k, v in estimates.items() if k != uid}
         if uid in estimates and not est_gelee(t):
             o, m, p = estimates[uid]
         elif t.getMilestone() or m == 0:
@@ -328,6 +366,8 @@ def build_graph(proj, opt_factor, pess_factor, estimates):
                 continue
             pred_uid = int(pred_task.getUniqueID())
             if pred_uid in tasks:
+                if reste_a_faire and est_achevee(tasks[pred_uid]):
+                    continue
                 lag = lag_days(rel)
                 G.add_edge(pred_uid, uid, lag=lag, type=type_lien(rel))
                 n_links += 1
@@ -419,53 +459,258 @@ def deterministic_duration(G):
     return max(early_finish.values()) if early_finish else 0.0
 
 
-def run_simulation(G, n_sims, rng, macros=None, seed_report_every=1000):
-    """Enchaine n_sims tirages.
+# Taille des blocs de tirages : on simule BLOC tirages a la fois, sous forme de
+# matrices (taches x tirages). Le produit est plafonne pour borner la memoire
+# (4 matrices de float64 : ~130 Mo a 4 millions d'elements).
+ELEMENTS_PAR_BLOC = 4_000_000
+CODE_TYPE = {"FS": 0, "SS": 1, "FF": 2, "SF": 3}
 
-    `macros` (facultatif) : dict {uid_macro: (nom, [uid_detail, ...])}. Quand il est
-    fourni, on conserve par iteration la date de fin de chaque macro-tache (le max
-    des fins de ses taches de detail) et un compteur d'iterations ou AU MOINS UNE de
-    ses taches est sur le chemin critique -- une fois par iteration et par macro,
-    pas une fois par tache. Le moteur de simulation lui-meme est inchange : la
-    correlation entre lots vient de ce qu'on lit les memes tirages, sans hypothese
-    statistique supplementaire.
+
+class Reseau:
+    """Graphe pre-indexe dans l'ordre topologique, pour le moteur vectorise."""
+
+    def __init__(self, G):
+        self.ordre = list(nx.topological_sort(G))
+        self.index = {n: i for i, n in enumerate(self.ordre)}
+        self.o = np.array([G.nodes[n]["o"] for n in self.ordre], dtype=float)
+        self.m = np.array([G.nodes[n]["m"] for n in self.ordre], dtype=float)
+        self.p = np.array([G.nodes[n]["p"] for n in self.ordre], dtype=float)
+        self.preds = [[(self.index[a], G[a][n].get("lag", 0.0), CODE_TYPE[G[a][n].get("type", "FS")])
+                       for a in G.predecessors(n)] for n in self.ordre]
+        self.succs = [[(self.index[s], G[n][s].get("lag", 0.0), CODE_TYPE[G[n][s].get("type", "FS")])
+                       for s in G.successors(n)] for n in self.ordre]
+
+    def __len__(self):
+        return len(self.ordre)
+
+
+def tirer_durees(res, nb, rng, correlation=0.0, groupes=None):
+    """Matrice (taches x nb) de durees PERT.
+
+    Avec `correlation` > 0, les durees des taches d'un meme groupe (lot) sont
+    correlees par leurs RANGS (methode d'Iman-Conover) : on tire des normales
+    correlees z = sqrt(r) * Z_lot + sqrt(1 - r) * e, puis on range les durees
+    deja tirees de chaque tache dans l'ordre de ses z. Les lois de chaque tache
+    sont donc exactement conservees ; seule leur dependance change. Sans cela, les
+    derives des taches d'un lot se compensent et le risque est sous-estime.
     """
-    order = list(nx.topological_sort(G))
-    finish_dates = np.zeros(n_sims)
-    on_critical = {n: 0 for n in G.nodes}
+    o, m, p = res.o, res.m, res.p
+    variable = p > o
+    durees = np.repeat(m[:, None], nb, axis=1)
+    if variable.any():
+        ov, pv = o[variable], p[variable]
+        mv = np.clip(m[variable], ov, pv)
+        alpha = 1 + 4.0 * (mv - ov) / (pv - ov)
+        beta = 1 + 4.0 * (pv - mv) / (pv - ov)
+        durees[variable] = ov[:, None] + rng.beta(
+            alpha[:, None], beta[:, None], size=(int(variable.sum()), nb)) * (pv - ov)[:, None]
+    if correlation > 0 and groupes is not None and nb > 1:
+        nb_groupes = int(groupes.max()) + 1
+        communs = rng.standard_normal((nb_groupes, nb))
+        z = (np.sqrt(correlation) * communs[groupes]
+             + np.sqrt(1 - correlation) * rng.standard_normal((len(res), nb)))
+        rangs = np.argsort(np.argsort(z, axis=1), axis=1)
+        durees = np.take_along_axis(np.sort(durees, axis=1), rangs, axis=1)
+    return durees
 
-    fins_macros = {m: np.zeros(n_sims) for m in macros} if macros else {}
-    critiques_macros = {m: 0 for m in macros} if macros else {}
 
-    for i in range(n_sims):
-        sampled_dur = {
-            n: sample_pert(G.nodes[n]["o"], G.nodes[n]["m"], G.nodes[n]["p"], rng)
-            for n in G.nodes
-        }
-        _, early_finish = passage_avant(G, order, sampled_dur)
+def passe_avant_bloc(res, durees):
+    """Dates au plus tot de tout un bloc de tirages (meme regles que passage_avant)."""
+    debut = np.zeros_like(durees)
+    fin = np.empty_like(durees)
+    for i in range(len(res)):
+        au_plus_tot = debut[i]
+        for j, lag, genre in res.preds[i]:
+            if genre == 0:
+                borne = fin[j] + lag
+            elif genre == 1:
+                borne = debut[j] + lag
+            elif genre == 2:
+                borne = fin[j] + lag - durees[i]
+            else:
+                borne = debut[j] + lag - durees[i]
+            np.maximum(au_plus_tot, borne, out=au_plus_tot)
+        fin[i] = au_plus_tot + durees[i]
+    return debut, fin
 
-        project_finish = max(early_finish.values()) if early_finish else 0.0
-        finish_dates[i] = project_finish
 
-        # chemin critique de cette iteration : taches sans marge, calcule par
-        # un passage arriere (backward pass) standard CPM
-        late_finish = passage_arriere(G, order, sampled_dur, project_finish)
-        critiques_iteration = set() if macros else None
-        for n in G.nodes:
-            slack = late_finish[n] - early_finish[n]
-            if abs(slack) < 1e-6:
-                on_critical[n] += 1
-                if critiques_iteration is not None:
-                    critiques_iteration.add(n)
+def passe_arriere_bloc(res, durees, fin_projet):
+    """Dates de fin au plus tard d'un bloc (memes regles que passage_arriere)."""
+    fin_tard = np.empty_like(durees)
+    for i in reversed(range(len(res))):
+        au_plus_tard = fin_tard[i]
+        au_plus_tard[:] = fin_projet
+        for s, lag, genre in res.succs[i]:
+            if genre == 0:
+                borne = fin_tard[s] - durees[s] - lag
+            elif genre == 1:
+                borne = fin_tard[s] - durees[s] - lag + durees[i]
+            elif genre == 2:
+                borne = fin_tard[s] - lag
+            else:
+                borne = fin_tard[s] - lag + durees[i]
+            np.minimum(au_plus_tard, borne, out=au_plus_tard)
+    return fin_tard
 
-        for macro, (_, uids) in (macros or {}).items():
-            fins_macros[macro][i] = max(early_finish[u] for u in uids)
-            if any(u in critiques_iteration for u in uids):
-                critiques_macros[macro] += 1
 
+def simuler(G, n_sims, rng, macros=None, correlation=0.0, groupes=None):
+    """Enchaine n_sims tirages, par blocs vectorises.
+
+    Rend un dict : `fins` (date de fin de chaque tirage), `critiques` (nombre de
+    tirages ou chaque tache est critique), `sensibilite` (correlation de Pearson
+    entre la duree tiree de chaque tache et la fin du projet), et, si `macros` est
+    fourni, `fins_macros` / `critiques_macros` comme run_simulation().
+
+    `groupes` : {uid: identifiant de lot} pour la correlation intra-lot.
+
+    Le traitement par blocs remplace la boucle tirage par tirage : un plan de
+    24 000 taches demandait 0,126 s par tirage (636 s pour 5 000), au-dela du delai
+    maximal ; les operations portent desormais sur des vecteurs de tirages.
+    """
+    res = Reseau(G)
+    n = len(res)
+    fins = np.zeros(n_sims)
+    critiques = np.zeros(n, dtype=np.int64)
+    somme_x = np.zeros(n)
+    somme_xx = np.zeros(n)
+    somme_xy = np.zeros(n)
+    somme_y = somme_yy = 0.0
+
+    indices_groupes = None
+    if groupes:
+        codes = {}
+        indices_groupes = np.array(
+            [codes.setdefault(groupes.get(u, "hors lot"), len(codes)) for u in res.ordre])
+
+    macros = macros or {}
+    lignes_macros = {mac: np.array([res.index[u] for u in uids]) for mac, (_, uids) in macros.items()}
+    fins_macros = {mac: np.zeros(n_sims) for mac in macros}
+    critiques_macros = {mac: 0 for mac in macros}
+
+    taille = max(1, min(n_sims, ELEMENTS_PAR_BLOC // max(n, 1)))
+    for depart in range(0, n_sims, taille):
+        nb = min(taille, n_sims - depart)
+        durees = tirer_durees(res, nb, rng, correlation, indices_groupes)
+        _, fin = passe_avant_bloc(res, durees)
+        fin_projet = fin.max(axis=0) if n else np.zeros(nb)
+        fins[depart:depart + nb] = fin_projet
+        critique = np.abs(passe_arriere_bloc(res, durees, fin_projet) - fin) < 1e-6
+        critiques += critique.sum(axis=1)
+
+        somme_x += durees.sum(axis=1)
+        somme_xx += (durees * durees).sum(axis=1)
+        somme_xy += durees @ fin_projet
+        somme_y += float(fin_projet.sum())
+        somme_yy += float(fin_projet @ fin_projet)
+
+        for mac, lignes in lignes_macros.items():
+            fins_macros[mac][depart:depart + nb] = fin[lignes].max(axis=0)
+            critiques_macros[mac] += int(critique[lignes].any(axis=0).sum())
+
+    cov = somme_xy / n_sims - (somme_x / n_sims) * (somme_y / n_sims)
+    var_x = somme_xx / n_sims - (somme_x / n_sims) ** 2
+    var_y = somme_yy / n_sims - (somme_y / n_sims) ** 2
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr = np.where((var_x > 1e-12) & (var_y > 1e-12), cov / np.sqrt(var_x * var_y), 0.0)
+
+    return {
+        "fins": fins,
+        "critiques": {u: int(critiques[i]) for i, u in enumerate(res.ordre)},
+        "sensibilite": {u: float(corr[i]) for i, u in enumerate(res.ordre)},
+        "fins_macros": fins_macros,
+        "critiques_macros": critiques_macros,
+    }
+
+
+def run_simulation(G, n_sims, rng, macros=None, seed_report_every=1000):
+    """Interface historique de simuler() : (fins, criticite) et, si `macros` est
+    fourni, (fins, criticite, fins par macro, criticite par macro)."""
+    resultat = simuler(G, n_sims, rng, macros=macros)
     if macros:
-        return finish_dates, on_critical, fins_macros, critiques_macros
-    return finish_dates, on_critical
+        return (resultat["fins"], resultat["critiques"],
+                resultat["fins_macros"], resultat["critiques_macros"])
+    return resultat["fins"], resultat["critiques"]
+
+
+def groupes_par_lot(proj, G):
+    """{uid de tache de detail: lot} au niveau de plan 1 ; les taches hors lot
+    forment un groupe a part."""
+    groupes = {}
+    for uid_lot, (_, details) in build_macro_groups(proj, 1).items():
+        for u in details:
+            if u in G.nodes:
+                groupes[u] = uid_lot
+    return groupes
+
+
+def date_apres(date_etat, jours):
+    """Date atteinte `jours` jours ouvres apres la date d'etat (calendrier du
+    projet), au format AAAA-MM-JJ. Repli : prorata calendaire de la semaine."""
+    if PROJECT_CALENDAR is not None:
+        try:
+            cible = PROJECT_CALENDAR.getDate(date_etat, Duration.getInstance(float(jours), TimeUnit.DAYS))
+            if cible is not None:
+                return str(cible)[:10]
+        except Exception:
+            pass
+    from datetime import date, timedelta
+    try:
+        depart = date.fromisoformat(str(date_etat)[:10])
+    except ValueError:
+        return "?"
+    return (depart + timedelta(days=jours * 7.0 / JOURS_OUVRES_SEMAINE)).isoformat()
+
+
+def afficher_prevision(proj, args, estimates):
+    """Bloc « Prevision depuis la date d'etat » (option --prevision).
+
+    Simulation du travail RESTANT (voir build_graph(reste_a_faire=True)) : reste a
+    faire planifie, P50 / P80 / P90 du reste a faire, et les dates de fin
+    correspondantes sur le calendrier du projet (week-ends et feries sautes).
+    """
+    date_etat = proj.getProjectProperties().getStatusDate()
+    if date_etat is None:
+        print("Prevision depuis la date d'etat : date d'etat absente -- prevision impossible.")
+        print()
+        return
+    G, _, _ = build_graph(proj, args.opt, args.pess, estimates, reste_a_faire=True)
+    if G.number_of_nodes() == 0 or not nx.is_directed_acyclic_graph(G):
+        return
+    rng = np.random.default_rng(args.seed + 1)
+    resultat = simuler(G, args.sims, rng, correlation=args.correlation,
+                       groupes=groupes_par_lot(proj, G) if args.correlation else None)
+    planifie = deterministic_duration(G)
+    print(f"Prevision depuis la date d'etat ({str(date_etat)[:10]}) :")
+    print(f"  Reste a faire planifie : {planifie:.1f} j -> fin {date_apres(date_etat, planifie)}")
+    for libelle, valeur in zip(("P50", "P80", "P90"), np.percentile(resultat["fins"], [50, 80, 90])):
+        print(f"  {libelle} : {valeur:.1f} j -> fin {date_apres(date_etat, valeur)}")
+    print()
+
+
+def afficher_sensibilite(G, sensibilite, nombre=10):
+    """Bloc « Sensibilite » (option --sensibilite) : les taches dont la duree tiree
+    est la plus correlee a la fin du projet. C'est le graphe « tornado » : une
+    tache toujours critique mais courte et peu incertaine pese peu."""
+    classees = sorted(((u, c) for u, c in sensibilite.items() if abs(c) > 1e-9),
+                      key=lambda kv: -abs(kv[1]))[:nombre]
+    print(f"Sensibilite (correlation duree de tache / fin de projet, top {nombre}) :")
+    if not classees:
+        print("  aucune tache n'a d'incertitude simulee")
+    else:
+        largeur = max(len(G.nodes[u]["name"]) for u, _ in classees) + 2
+        for u, c in classees:
+            print(f"  {G.nodes[u]['name']:<{largeur}} {c:+.2f}")
+    print()
+
+
+def afficher_distribution(fins, classes):
+    """Bloc « Distribution » (option --histogramme N) : effectif par classe de
+    duree simulee, pour l'histogramme et la courbe en S."""
+    effectifs, bornes = np.histogram(fins, bins=classes)
+    print(f"Distribution de la duree simulee ({classes} classes) :")
+    for i, effectif in enumerate(effectifs):
+        print(f"  {bornes[i]:.2f} - {bornes[i + 1]:.2f} : {int(effectif)}")
+    print()
 
 
 def liens_recapitulatifs(proj):
@@ -563,7 +808,20 @@ def main():
                      help="Ajoute la repartition par macro-tache (taches recapitulatives "
                           "de niveau de plan N ; 1 = juste sous la tache de projet). "
                           "Sans cette option, la sortie est inchangee.")
+    ap.add_argument("--correlation", type=float, default=0.0, metavar="R",
+                     help="Correlation des durees entre taches d'un meme lot de niveau 1 "
+                          "(0 a 0.9, defaut 0 = taches independantes).")
+    ap.add_argument("--sensibilite", action="store_true",
+                     help="Ajoute le classement des taches par sensibilite (tornado).")
+    ap.add_argument("--histogramme", type=int, default=0, metavar="N",
+                     help="Ajoute la distribution de la duree simulee en N classes.")
+    ap.add_argument("--prevision", action="store_true",
+                     help="Ajoute le reste a faire et les dates de fin depuis la date d'etat.")
     args = ap.parse_args()
+    if not 0.0 <= args.correlation <= 0.9:
+        ap.error("--correlation doit etre comprise entre 0 et 0.9")
+    if args.histogramme and not 2 <= args.histogramme <= 100:
+        ap.error("--histogramme doit etre compris entre 2 et 100")
 
     reader = UniversalProjectReader()
     proj = reader.read(args.path)
@@ -640,16 +898,17 @@ def main():
         return
 
     rng = np.random.default_rng(args.seed)
-    if macros:
-        finish_dates, on_critical, fins_macros, critiques_macros = run_simulation(
-            G, args.sims, rng, macros=macros)
-    else:
-        finish_dates, on_critical = run_simulation(G, args.sims, rng)
+    resultat = simuler(G, args.sims, rng, macros=macros, correlation=args.correlation,
+                       groupes=groupes_par_lot(proj, G) if args.correlation else None)
+    finish_dates, on_critical = resultat["fins"], resultat["critiques"]
+    fins_macros, critiques_macros = resultat["fins_macros"], resultat["critiques_macros"]
 
     p50, p80, p90 = np.percentile(finish_dates, [50, 80, 90])
     deterministic = deterministic_duration(G)
 
     print(f"Simulations : {args.sims}")
+    if args.correlation:
+        print(f"Correlation intra-lot : {args.correlation:.2f} (lots de niveau 1)")
     print()
     print(f"Duree deterministe (chemin critique, durees planifiees) : {deterministic:.1f} j")
     print(f"P50 (mediane simulee)  : {p50:.1f} j  ({p50 - deterministic:+.1f} j vs planifie)")
@@ -663,6 +922,13 @@ def main():
         name = G.nodes[uid]["name"]
         print(f"  {name:<{name_w}} {100.0 * count / args.sims:5.1f}%")
     print()
+
+    if args.sensibilite:
+        afficher_sensibilite(G, resultat["sensibilite"])
+    if args.histogramme:
+        afficher_distribution(finish_dates, args.histogramme)
+    if args.prevision:
+        afficher_prevision(proj, args, estimates)
 
     if args.macro_level is not None:
         afficher_repartition_macros(

@@ -118,6 +118,15 @@
                 <p class="small muted" style="margin-top:6px">Format : <span class="mono">task_id,optimistic,most_likely,pessimistic</span> en jours.</p>
               </div>
               <div class="field">
+                <label for="correlation">Corrélation entre tâches d’un même lot</label>
+                <select id="correlation" name="correlation">
+                  <option value="" selected>Aucune — tâches indépendantes</option>
+                  <option value="0.3">Faible (0,3) — aléas partagés modérés</option>
+                  <option value="0.6">Forte (0,6) — même équipe, même technologie</option>
+                </select>
+                <p class="small muted" style="margin-top:6px">Des tâches indépendantes se compensent et sous-estiment le risque ; la corrélation porte sur les lots de niveau 1.</p>
+              </div>
+              <div class="field">
                 <label for="macro">Répartition du risque par lot (facultatif)</label>
                 <select id="macro" name="macro_level">
                   <option value="" selected>Aucune — résultat global seulement</option>
