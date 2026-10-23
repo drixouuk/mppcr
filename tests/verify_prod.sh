@@ -57,8 +57,8 @@ echo
 echo "=== 2. formulaire : exports facultatifs, attente, arrêt ==="
 curl -fsS "$BASE/" -o "$WORK/index.html"
 check "$(res $?)" "GET / = 200"
-check "$([ "$(grep -o 'name="export" id=' "$WORK/index.html" | wc -l)" = "2" ] && echo 1 || echo 0)" \
-  "deux exports proposés (CSV, Excel)"
+check "$([ "$(grep -o 'name="export" id=' "$WORK/index.html" | wc -l)" = "3" ] && echo 1 || echo 0)" \
+  "trois exports proposés (CSV, Excel, rapport PDF)"
 grep -q 'class="stepper"' "$WORK/index.html"; check "$(res $?)" "fil d'étapes de la maquette"
 grep -qE 'class="version-tag">v[0-9]+\.[0-9]+\.[0-9]+[^<]*<' "$WORK/index.html"
 check "$(res $?)" "version affichée dans l'en-tête"
